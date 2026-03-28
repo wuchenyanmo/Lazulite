@@ -20,44 +20,12 @@ def _clamp01(value: float) -> float:
 
 def _safe_text(text: str) -> str:
     """
-    清理多余空白，得到适合拼接 prompt 的文本。
+    清理多余空白，得到适合展示和拼接的文本。
 
     参数:
         text: 原始文本。
     """
     return " ".join((text or "").strip().split())
-
-
-class WhisperWord:
-    """
-    Whisper 词级时间戳对象。
-    """
-
-    def __init__(self, text: str, start: float | None, end: float | None, confidence: float | None):
-        """
-        初始化单个词对象。
-
-        参数:
-            text: 词文本。
-            start: 词开始时间，单位秒；可能为空。
-            end: 词结束时间，单位秒；可能为空。
-            confidence: 词级置信度。当前实现使用片段平均置信度作为近似值。
-        """
-        self.text = text
-        self.start = start
-        self.end = end
-        self.confidence = confidence
-
-    def to_dict(self) -> dict:
-        """
-        将词对象转换为字典。
-        """
-        return {
-            "text": self.text,
-            "start": self.start,
-            "end": self.end,
-            "confidence": self.confidence,
-        }
 
 
 class WhisperChunkResult:
@@ -77,12 +45,13 @@ class WhisperChunkResult:
         avg_logprob: float | None,
         avg_confidence: float | None,
         confidence_source: str,
+        token_confidences: list[dict] | None,
+        min_token_confidence: float | None,
+        low_conf_token_ratio: float | None,
         compression_ratio: float,
-        padding_word_ratio: float,
         hallucination_risk: float,
         prompt_text: str,
         scores: dict,
-        words: list[WhisperWord],
         raw_result: dict | None = None,
     ):
         """
@@ -95,17 +64,18 @@ class WhisperChunkResult:
             core_start: 核心区间开始时间，单位秒。
             core_end: 核心区间结束时间，单位秒。
             text: 转写文本。
-            language: Whisper 输出语言。
+            language: Whisper 语言设置；未指定时为 None。
             avg_logprob: 片段平均对数概率。
-            avg_confidence: 片段级置信度分数。
-            confidence_source: 置信度来源，当前默认使用低显存启发式估计。
-            compression_ratio: 文本压缩率，用于辅助识别重复或模板化输出。
-            padding_word_ratio: 落在 padding 区间的词占比。
+            avg_confidence: 片段平均置信度。
+            confidence_source: 置信度来源。
+            token_confidences: token 级置信度列表。
+            min_token_confidence: 最低 token 置信度。
+            low_conf_token_ratio: 低置信 token 占比。
+            compression_ratio: 文本压缩率。
             hallucination_risk: 幻觉风险分数。
             prompt_text: 实际送入 Whisper 的文本提示。
             scores: 对应音频分片的声学分数。
-            words: 词级时间戳对象列表。
-            raw_result: 原始 Whisper 返回结果。
+            raw_result: 精简后的原始生成结果。
         """
         self.segment_index = segment_index
         self.start = start
@@ -117,12 +87,13 @@ class WhisperChunkResult:
         self.avg_logprob = avg_logprob
         self.avg_confidence = avg_confidence
         self.confidence_source = confidence_source
+        self.token_confidences = token_confidences
+        self.min_token_confidence = min_token_confidence
+        self.low_conf_token_ratio = low_conf_token_ratio
         self.compression_ratio = compression_ratio
-        self.padding_word_ratio = padding_word_ratio
         self.hallucination_risk = hallucination_risk
         self.prompt_text = prompt_text
         self.scores = scores
-        self.words = words
         self.raw_result = raw_result or {}
 
     def to_dict(self) -> dict:
@@ -140,12 +111,13 @@ class WhisperChunkResult:
             "avg_logprob": self.avg_logprob,
             "avg_confidence": self.avg_confidence,
             "confidence_source": self.confidence_source,
+            "token_confidences": self.token_confidences,
+            "min_token_confidence": self.min_token_confidence,
+            "low_conf_token_ratio": self.low_conf_token_ratio,
             "compression_ratio": self.compression_ratio,
-            "padding_word_ratio": self.padding_word_ratio,
             "hallucination_risk": self.hallucination_risk,
             "prompt_text": self.prompt_text,
             "scores": self.scores,
-            "words": [word.to_dict() for word in self.words],
             "raw_result": self.raw_result,
         }
 
@@ -161,7 +133,7 @@ class WhisperTrackResult:
 
         参数:
             music_path: 原始音频路径。
-            language: 目标语言。
+            language: 语言设置。
             chunks: 分片转写结果列表。
         """
         self.music_path = music_path
@@ -171,14 +143,14 @@ class WhisperTrackResult:
     @property
     def merged_text(self) -> str:
         """
-        获取整首歌的拼接转写文本。
+        获取整首歌拼接后的文本。
         """
         return "\n".join(chunk.text for chunk in self.chunks if chunk.text)
 
     @property
     def stats(self) -> dict:
         """
-        汇总整首歌转写统计。
+        汇总整首歌的转写统计。
         """
         if not self.chunks:
             return {
@@ -215,11 +187,10 @@ class WhisperTranscriber:
     基于 Whisper 的分片转写器。
 
     说明:
-        这个类只负责“对已经切好的片段做转写并收集证据”，不负责歌词对齐。
-        上下文 prompt 只作为轻提示使用：
-        1. 优先使用最近的高置信转写文本，保持上下文连续。
-        2. 可选追加很短的歌词拼写提示。
-        3. 对高风险片段自动减弱或关闭 prompt，避免把 Whisper 带成脑补模式。
+        当前实现只保留一条主路径：
+        1. 用 `model.generate()` 直接生成文本。
+        2. 同时读取 `output_scores=True` 得到 token 级置信度。
+        3. 不再依赖词级时间戳，不再混用 pipeline 文本结果。
     """
 
     def __init__(
@@ -231,7 +202,6 @@ class WhisperTranscriber:
         torch_dtype: torch.dtype | None = None,
         batch_size: int = 1,
         max_new_tokens: int = 256,
-        return_word_timestamps: bool = False,
         min_presence: float = 0.20,
         min_duration_sec: float = 0.80,
         prompt_mode: str = "hybrid",
@@ -246,17 +216,16 @@ class WhisperTranscriber:
             model_id: Whisper 模型路径或模型名。
             language: 指定语言；为 None 时让模型自动判断。
             task: Whisper 任务，通常为 `transcribe`。
-            device: 推理设备，默认为自动选择 cuda / cpu。
-            torch_dtype: 推理精度，默认为 cuda 使用 bfloat16，否则 float32。
-            batch_size: 当前实现主要按片段逐个转写，此参数预留给后续批处理。
+            device: 推理设备。
+            torch_dtype: 推理精度。
+            batch_size: 预留参数，当前逐段转写。
             max_new_tokens: 最大生成 token 数。
-            return_word_timestamps: 是否请求词级时间戳。开启后显存与耗时都会明显上升。
-            min_presence: 最低人声存在分数，低于该值可直接跳过。
-            min_duration_sec: 最短转写片段时长，过短片段容易诱发幻觉。
+            min_presence: 最低人声存在分数。
+            min_duration_sec: 最短转写片段时长。
             prompt_mode: prompt 策略，可选 `none` / `previous` / `hint` / `hybrid`。
             max_prompt_chars: prompt 总长度上限。
-            max_previous_chunks: 最多回看多少个高置信历史片段。
-            max_lyric_hint_chars: 歌词提示部分的长度上限。
+            max_previous_chunks: 最多回看多少个历史片段作为 prompt。
+            max_lyric_hint_chars: 歌词提示的长度上限。
         """
         self.model_id = model_id
         self.language = language
@@ -265,7 +234,6 @@ class WhisperTranscriber:
         self.torch_dtype = torch_dtype or (torch.float16 if self.device.startswith("cuda") else torch.float32)
         self.batch_size = batch_size
         self.max_new_tokens = max_new_tokens
-        self.return_word_timestamps = return_word_timestamps
         self.min_presence = min_presence
         self.min_duration_sec = min_duration_sec
         self.prompt_mode = prompt_mode
@@ -275,16 +243,15 @@ class WhisperTranscriber:
 
         self.model = None
         self.processor = None
-        self.pipe = None
 
     def load_model(self):
         """
-        懒加载 Whisper 模型、处理器和 pipeline。
+        懒加载 Whisper 模型和处理器。
         """
-        if self.model is not None and self.processor is not None and self.pipe is not None:
+        if self.model is not None and self.processor is not None:
             return
 
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
         model_kwargs = {
             "dtype": self.torch_dtype,
@@ -297,22 +264,11 @@ class WhisperTranscriber:
         self.model = AutoModelForSpeechSeq2Seq.from_pretrained(self.model_id, **model_kwargs)
         self.model.to(self.device)
         self.processor = AutoProcessor.from_pretrained(self.model_id)
-        self.pipe = pipeline(
-            "automatic-speech-recognition",
-            model=self.model,
-            tokenizer=self.processor.tokenizer,
-            feature_extractor=self.processor.feature_extractor,
-            max_new_tokens=self.max_new_tokens,
-            batch_size=self.batch_size,
-            dtype=self.torch_dtype,
-            device=self.device,
-        )
 
     def unload_model(self):
         """
-        主动释放 Whisper 模型与 pipeline 占用的资源。
+        主动释放 Whisper 模型占用的资源。
         """
-        self.pipe = None
         self.processor = None
         if self.model is not None:
             try:
@@ -338,7 +294,7 @@ class WhisperTranscriber:
     @staticmethod
     def prepare_audio(audio: np.ndarray, input_sr: int, target_sr: int = 16000) -> np.ndarray:
         """
-        将分片音频整理为 Whisper 所需的 16kHz 单声道输入。
+        将音频整理为 Whisper 所需的 16kHz 单声道输入。
 
         参数:
             audio: 输入音频。
@@ -390,7 +346,7 @@ class WhisperTranscriber:
         将歌词提示统一展开成短文本列表。
 
         参数:
-            lyric_hint: 可为字符串、字符串列表，或 `LyricLineStamp` 这类歌词对象。
+            lyric_hint: 可为字符串、字符串列表，或歌词对象。
         """
         if lyric_hint is None:
             return []
@@ -409,6 +365,27 @@ class WhisperTranscriber:
             return [_safe_text(str(item)) for item in lyric_hint if _safe_text(str(item))]
         return [_safe_text(str(lyric_hint))]
 
+    def is_context_usable(self, chunk: WhisperChunkResult) -> bool:
+        """
+        判断历史分片是否适合作为上下文。
+
+        参数:
+            chunk: 已完成转写的历史分片。
+        """
+        if not chunk.text:
+            return False
+        if (chunk.avg_confidence or 0.0) < 0.50:
+            return False
+        if chunk.hallucination_risk > 0.45:
+            return False
+        if float(chunk.scores.get("off_center_risk", 0.0)) > 0.35:
+            return False
+        if chunk.min_token_confidence is not None and chunk.min_token_confidence < 0.18:
+            return False
+        if chunk.low_conf_token_ratio is not None and chunk.low_conf_token_ratio > 0.35:
+            return False
+        return True
+
     def build_prompt_text(
         self,
         previous_chunks: list[WhisperChunkResult],
@@ -420,12 +397,8 @@ class WhisperTranscriber:
 
         参数:
             previous_chunks: 已转写完成的历史片段。
-            lyric_hint: 可选的歌词拼写提示。
-            off_center_risk: 当前片段的偏离中置风险，高风险时会自动减少 prompt。
-
-        说明:
-            这里只提供“最近高置信历史文本 + 短歌词提示”，
-            不直接灌入整首歌词，避免模型把提示当答案进行脑补。
+            lyric_hint: 可选歌词提示。
+            off_center_risk: 当前片段的偏离中置风险。
         """
         if self.prompt_mode == "none":
             return ""
@@ -437,11 +410,7 @@ class WhisperTranscriber:
         if self.prompt_mode in {"previous", "hybrid"}:
             usable_previous = []
             for chunk in reversed(previous_chunks):
-                if not chunk.text:
-                    continue
-                if (chunk.avg_confidence or 0.0) < 0.45:
-                    continue
-                if chunk.hallucination_risk > 0.55:
+                if not self.is_context_usable(chunk):
                     continue
                 usable_previous.append(chunk.text)
                 if len(usable_previous) >= self.max_previous_chunks:
@@ -453,9 +422,7 @@ class WhisperTranscriber:
             hint_items = []
             used_chars = 0
             for item in self._extract_lyric_hint_items(lyric_hint):
-                if not item:
-                    continue
-                if item in hint_items:
+                if not item or item in hint_items:
                     continue
                 extra = len(item) + (1 if hint_items else 0)
                 if used_chars + extra > self.max_lyric_hint_chars:
@@ -477,7 +444,7 @@ class WhisperTranscriber:
         参数:
             prompt_text: 文本提示。
         """
-        generate_kwargs = {
+        generate_kwargs: dict = {
             "task": self.task,
             "condition_on_prev_tokens": False,
         }
@@ -491,8 +458,7 @@ class WhisperTranscriber:
                 generate_kwargs["prompt_ids"] = prompt_ids
             except TypeError:
                 try:
-                    prompt_ids = self.processor.get_prompt_ids(prompt_text)
-                    generate_kwargs["prompt_ids"] = prompt_ids
+                    generate_kwargs["prompt_ids"] = self.processor.get_prompt_ids(prompt_text)
                 except Exception:
                     pass
             except Exception:
@@ -503,26 +469,19 @@ class WhisperTranscriber:
         self,
         text: str,
         compression_ratio: float,
-        padding_word_ratio: float,
         vocal_presence: float,
         off_center_risk: float,
         duration: float,
     ) -> float:
         """
-        估计片段级置信度。
+        在极少数无法拿到 generate 分数时估计置信度。
 
         参数:
             text: 转写文本。
             compression_ratio: 文本压缩率。
-            padding_word_ratio: 落在 padding 区间的词占比。
             vocal_presence: 音频侧的人声存在分数。
             off_center_risk: 音频侧偏离中置风险。
             duration: 片段时长。
-
-        说明:
-            直接再跑一次 `generate(output_scores=True)` 会显著增加显存占用，
-            对 6GB 显存设备不够友好。这里改为单次推理后的轻量估计分数，
-            用于测试和后续降权，而不是精确 token logprob。
         """
         clean = _safe_text(text)
         if not clean:
@@ -534,58 +493,110 @@ class WhisperTranscriber:
         repeat_risk = self._repeat_ratio(clean)
 
         confidence = (
-            0.52 * vocal_presence
-            + 0.22 * (1.0 - off_center_risk)
-            + 0.14 * (1.0 - padding_word_ratio)
-            + 0.08 * (1.0 - compression_risk)
-            + 0.04 * (1.0 - max(density_risk, repeat_risk))
+            0.60 * vocal_presence
+            + 0.24 * (1.0 - off_center_risk)
+            + 0.10 * (1.0 - compression_risk)
+            + 0.06 * (1.0 - max(density_risk, repeat_risk))
         )
         return _clamp01(confidence)
 
-    @staticmethod
-    def _extract_words(prediction: dict, segment: dict, avg_confidence: float | None) -> tuple[list[WhisperWord], float]:
+    def compute_generation_result(
+        self,
+        audio_16k: np.ndarray,
+        generate_kwargs: dict,
+    ) -> tuple[str | None, float | None, float | None, list[dict] | None, dict | None]:
         """
-        解析词级时间戳，并计算 padding 区词占比。
+        使用 `model.generate()` 直接得到文本和 token 级置信度。
 
         参数:
-            prediction: pipeline 返回结果。
-            segment: 当前分片字典。
-            avg_confidence: 片段平均置信度。
+            audio_16k: 16kHz 单声道音频。
+            generate_kwargs: Whisper 生成参数。
         """
-        words: list[WhisperWord] = []
-        outside_core = 0
+        if self.model is None or self.processor is None:
+            return None, None, None, None, None
 
-        for item in prediction.get("chunks", []) or []:
-            text = _safe_text(item.get("text", ""))
-            timestamp = item.get("timestamp")
-            if not text or not isinstance(timestamp, (list, tuple)) or len(timestamp) != 2:
-                continue
-            local_start, local_end = timestamp
-            if local_start is None or local_end is None:
-                continue
+        try:
+            with torch.inference_mode():
+                inputs = self.processor(audio_16k, sampling_rate=16000, return_tensors="pt")
+                input_features = inputs.get("input_features")
+                if input_features is None:
+                    return None, None, None, None, None
+                input_features = input_features.to(self.device, dtype=self.torch_dtype)
 
-            abs_start = float(segment["start"] + local_start)
-            abs_end = float(segment["start"] + local_end)
-            if abs_end <= segment["core_start"] or abs_start >= segment["core_end"]:
-                outside_core += 1
-            words.append(
-                WhisperWord(
-                    text=text,
-                    start=abs_start,
-                    end=abs_end,
-                    confidence=avg_confidence,
+                outputs = self.model.generate(
+                    input_features=input_features,
+                    max_new_tokens=self.max_new_tokens,
+                    output_scores=True,
+                    return_dict_in_generate=True,
+                    **generate_kwargs,
+                )
+
+            sequences = getattr(outputs, "sequences", None)
+            scores = getattr(outputs, "scores", None)
+            if sequences is None or not scores:
+                return None, None, None, None, None
+
+            decoded_text = _safe_text(
+                self.processor.tokenizer.decode(
+                    sequences[0],
+                    skip_special_tokens=True,
                 )
             )
 
-        padding_word_ratio = outside_core / max(len(words), 1) if words else 0.0
-        return words, float(padding_word_ratio)
+            generated_ids = sequences[0, -len(scores):]
+            token_logprobs = []
+            token_confidences = []
+            for step_index, step_scores in enumerate(scores):
+                token_id = int(generated_ids[step_index])
+                step_log_probs = torch.log_softmax(step_scores[0], dim=-1)
+                token_logprob = float(step_log_probs[token_id].detach().cpu())
+                token_confidence = float(np.clip(np.exp(token_logprob), 0.0, 1.0))
+                token_text = self.processor.tokenizer.decode([token_id], skip_special_tokens=False)
+                token_logprobs.append(token_logprob)
+                token_confidences.append(
+                    {
+                        "token_id": token_id,
+                        "token": token_text,
+                        "logprob": token_logprob,
+                        "confidence": token_confidence,
+                    }
+                )
+
+            avg_logprob = float(np.mean(token_logprobs)) if token_logprobs else None
+            avg_confidence = float(np.clip(np.exp(avg_logprob), 0.0, 1.0)) if avg_logprob is not None else None
+            return decoded_text, avg_logprob, avg_confidence, token_confidences, {"text": decoded_text}
+        except Exception:
+            return None, None, None, None, None
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    @staticmethod
+    def token_confidence_stats(token_confidences: list[dict] | None) -> tuple[float | None, float | None]:
+        """
+        统计 token 级置信度的最低值与低分占比。
+
+        参数:
+            token_confidences: token 级置信度列表。
+        """
+        if not token_confidences:
+            return None, None
+        values = [
+            float(item["confidence"])
+            for item in token_confidences
+            if item.get("token", "").strip()
+        ]
+        if not values:
+            return None, None
+        min_conf = float(np.min(values))
+        low_ratio = float(np.mean(np.array(values) < 0.35))
+        return min_conf, low_ratio
 
     def score_hallucination_risk(
         self,
         text: str,
         avg_confidence: float | None,
         compression_ratio: float,
-        padding_word_ratio: float,
         off_center_risk: float,
         duration: float,
     ) -> float:
@@ -596,13 +607,8 @@ class WhisperTranscriber:
             text: 转写文本。
             avg_confidence: 平均置信度。
             compression_ratio: 文本压缩率。
-            padding_word_ratio: 落在 padding 区间的词占比。
-            off_center_risk: 音频侧的偏离中置风险。
+            off_center_risk: 音频侧偏离中置风险。
             duration: 片段时长。
-
-        说明:
-            这里不是简单照搬 Whisper 的阈值，而是把声学风险和文本异常一起纳入。
-            对高 `off_center_risk` 片段，即使转写出了文本，也会提高其幻觉风险。
         """
         clean = _safe_text(text)
         if not clean:
@@ -615,11 +621,10 @@ class WhisperTranscriber:
         compression_risk = _clamp01((compression_ratio - 1.8) / 1.4)
 
         risk = (
-            0.34 * inverse_conf
-            + 0.24 * off_center_risk
-            + 0.16 * padding_word_ratio
-            + 0.14 * compression_risk
-            + 0.07 * repeat_ratio
+            0.42 * inverse_conf
+            + 0.28 * off_center_risk
+            + 0.17 * compression_risk
+            + 0.08 * repeat_ratio
             + 0.05 * density_risk
         )
         return _clamp01(risk)
@@ -644,37 +649,31 @@ class WhisperTranscriber:
         segment_data = self._coerce_segment(segment)
         scores = segment_data["scores"]
         audio_16k = self.prepare_audio(segment_data["audio"], input_sr=sr)
-
         generate_kwargs = self._build_generate_kwargs(prompt_text)
-        pipe_kwargs = {
-            "generate_kwargs": generate_kwargs,
-        }
-        if self.return_word_timestamps:
-            pipe_kwargs["return_timestamps"] = "word"
-        prediction = self.pipe(
-            {"array": audio_16k, "sampling_rate": 16000},
-            **pipe_kwargs,
-        )
 
-        text = _safe_text(prediction.get("text", ""))
-        compression_ratio = self._compression_ratio(text)
-        words, padding_word_ratio = self._extract_words(prediction, segment_data, None)
-        avg_logprob = None
-        avg_confidence = self.estimate_confidence(
-            text=text,
-            compression_ratio=compression_ratio,
-            padding_word_ratio=padding_word_ratio,
-            vocal_presence=float(scores.get("vocal_presence", 0.0)),
-            off_center_risk=float(scores.get("off_center_risk", 0.0)),
-            duration=float(segment_data["duration"]),
+        text, avg_logprob, avg_confidence, token_confidences, raw_result = self.compute_generation_result(
+            audio_16k=audio_16k,
+            generate_kwargs=generate_kwargs,
         )
-        for word in words:
-            word.confidence = avg_confidence
+        text = text or ""
+        min_token_confidence, low_conf_token_ratio = self.token_confidence_stats(token_confidences)
+        compression_ratio = self._compression_ratio(text)
+
+        confidence_source = "generate_scores"
+        if avg_confidence is None:
+            confidence_source = "heuristic"
+            avg_confidence = self.estimate_confidence(
+                text=text,
+                compression_ratio=compression_ratio,
+                vocal_presence=float(scores.get("vocal_presence", 0.0)),
+                off_center_risk=float(scores.get("off_center_risk", 0.0)),
+                duration=float(segment_data["duration"]),
+            )
+
         hallucination_risk = self.score_hallucination_risk(
             text=text,
             avg_confidence=avg_confidence,
             compression_ratio=compression_ratio,
-            padding_word_ratio=padding_word_ratio,
             off_center_risk=float(scores.get("off_center_risk", 0.0)),
             duration=float(segment_data["duration"]),
         )
@@ -689,14 +688,15 @@ class WhisperTranscriber:
             language=self.language,
             avg_logprob=avg_logprob,
             avg_confidence=avg_confidence,
-            confidence_source="heuristic",
+            confidence_source=confidence_source,
+            token_confidences=token_confidences,
+            min_token_confidence=min_token_confidence,
+            low_conf_token_ratio=low_conf_token_ratio,
             compression_ratio=compression_ratio,
-            padding_word_ratio=padding_word_ratio,
             hallucination_risk=hallucination_risk,
             prompt_text=prompt_text,
             scores=dict(scores),
-            words=words,
-            raw_result=prediction,
+            raw_result=raw_result,
         )
 
     def transcribe_analysis(
@@ -710,10 +710,6 @@ class WhisperTranscriber:
         参数:
             analysis_result: `VocalAnalyzer.analyze_file()` 的结果对象或字典。
             lyric_hint: 可选的轻量歌词提示。
-
-        说明:
-            这里只把 `vocal_presence` 足够高、且时长不太短的片段送入 Whisper。
-            `off_center_risk` 不直接决定跳过，而是决定 prompt 强度和后续风险分数。
         """
         if isinstance(analysis_result, VocalAnalysisResult):
             data = analysis_result.to_dict()
