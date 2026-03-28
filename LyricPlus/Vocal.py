@@ -230,6 +230,28 @@ class VocalAnalyzer:
         return _model
 
     @staticmethod
+    def release_model():
+        """
+        释放全局缓存的 Demucs 模型，避免与后续 ASR 模型同时占用显存。
+
+        说明:
+            当前分离流程使用了全局缓存模型以便重复调用时更快，
+            但在“先分离、再转写”的链路里，这会导致 Demucs 和 Whisper 同时驻留在 GPU。
+            对 6GB 显存设备，这通常就是显存峰值接近 9GB 的主要原因。
+        """
+        global _model
+        if _model is None:
+            return
+        try:
+            _model.cpu()
+        except Exception:
+            pass
+        _model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    @staticmethod
     def ensure_stereo_44k(waveform: torch.Tensor, sr: int) -> tuple[torch.Tensor, int]:
         """
         将输入音频统一到 44.1kHz 双声道。
