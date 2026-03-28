@@ -2,6 +2,7 @@ import gc
 
 import librosa
 import numpy as np
+from scipy.signal import find_peaks
 import torch
 import torchaudio
 from demucs.apply import apply_model
@@ -323,7 +324,8 @@ def _split_long_interval(
     intervals = [(start_frame, end_frame)]
     min_frames = max(int(round(min_segment_sec * sr / hop_length)), 1)
     max_frames = max(int(round(max_segment_sec * sr / hop_length)), min_frames + 1)
-    valley_window = max(int(round(0.16 * sr / hop_length)), 1)
+    valley_window = max(int(round(0.18 * sr / hop_length)), 1)
+    min_peak_distance = max(min_frames // 2, 1)
 
     while True:
         next_intervals = []
@@ -338,29 +340,55 @@ def _split_long_interval(
                 next_intervals.append((cur_start, cur_end))
                 continue
 
-            best_split = None
-            best_value = float("inf")
             search_start = cur_start + min_frames
             search_end = cur_end - min_frames
-            interval_median = float(np.median(split_activity[cur_start:cur_end]))
-            interval_low = float(np.percentile(split_activity[cur_start:cur_end], 20))
-            dynamic_threshold = min(valley_threshold, interval_low + 0.08)
+            local_split = split_activity[cur_start:cur_end]
+            local_raw = activity[cur_start:cur_end]
+            search_local = local_split[min_frames: len(local_split) - min_frames]
 
-            # 在长片段内部寻找更平滑的谷底，作为更自然的断句点。
-            for frame_idx in range(search_start, search_end):
-                local_start = max(cur_start, frame_idx - valley_window)
-                local_end = min(cur_end, frame_idx + valley_window)
-                valley_value = float(np.mean(split_activity[local_start:local_end]))
-                # 额外参考原 activity，避免只因为过度平滑而把高活跃区中心误当成谷底。
-                raw_penalty = 0.08 * float(np.mean(activity[local_start:local_end]))
-                distance_penalty = abs(frame_idx - (cur_start + cur_end) / 2) / max(cur_end - cur_start, 1)
-                candidate_value = valley_value + raw_penalty + 0.08 * distance_penalty
-                if candidate_value < best_value:
-                    best_value = candidate_value
-                    best_split = frame_idx
+            best_split = None
+            best_score = float("-inf")
 
-            # 如果没有足够明显的谷值，就退化成按长度硬切，避免片段过长。
-            if best_split is None or best_value > dynamic_threshold or best_value > interval_median * 0.92:
+            if search_local.size > 0:
+                dynamic_range = float(np.percentile(local_split, 85) - np.percentile(local_split, 15))
+                min_prominence = max(0.035, 0.22 * dynamic_range)
+                valley_indices, valley_props = find_peaks(
+                    -search_local,
+                    prominence=min_prominence,
+                    distance=min_peak_distance,
+                )
+
+                if valley_indices.size > 0:
+                    prominences = valley_props.get("prominences", np.zeros_like(valley_indices, dtype=np.float32))
+                    interval_median = float(np.median(local_split))
+                    interval_low = float(np.percentile(local_split, 20))
+
+                    for local_idx, prominence in zip(valley_indices, prominences):
+                        frame_idx = cur_start + min_frames + int(local_idx)
+                        local_start = max(cur_start, frame_idx - valley_window)
+                        local_end = min(cur_end, frame_idx + valley_window)
+
+                        valley_value = float(np.mean(split_activity[local_start:local_end]))
+                        raw_value = float(np.mean(activity[local_start:local_end]))
+                        valley_depth = interval_median - valley_value
+                        low_bonus = max(0.0, interval_low - valley_value)
+                        distance_penalty = abs(frame_idx - (cur_start + cur_end) / 2) / max(cur_end - cur_start, 1)
+                        raw_bonus = max(0.0, interval_median - raw_value)
+
+                        # 综合考虑谷底显著性(prominence)、谷深、以及不要过分偏向边缘。
+                        candidate_score = (
+                            1.35 * float(prominence)
+                            + 0.55 * valley_depth
+                            + 0.35 * low_bonus
+                            + 0.20 * raw_bonus
+                            - 0.18 * distance_penalty
+                        )
+                        if candidate_score > best_score:
+                            best_score = candidate_score
+                            best_split = frame_idx
+
+            # 如果没有足够显著的谷底，就退化成按长度硬切，避免片段过长。
+            if best_split is None or best_score < valley_threshold:
                 hard_split = cur_start + max_frames
                 if cur_end - hard_split < min_frames:
                     hard_split = (cur_start + cur_end) // 2
