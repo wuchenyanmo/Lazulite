@@ -1,4 +1,5 @@
 import gzip
+from difflib import SequenceMatcher
 from collections.abc import Iterable
 
 import librosa
@@ -49,7 +50,10 @@ class WhisperChunkResult:
         min_token_confidence: float | None,
         low_conf_token_ratio: float | None,
         compression_ratio: float,
+        self_repeat_score: float,
+        context_text: str,
         hallucination_risk: float,
+        risk_components: dict,
         prompt_text: str,
         scores: dict,
         raw_result: dict | None = None,
@@ -72,7 +76,10 @@ class WhisperChunkResult:
             min_token_confidence: 最低 token 置信度。
             low_conf_token_ratio: 低置信 token 占比。
             compression_ratio: 文本压缩率。
+            self_repeat_score: 句内重复分数，用于识别“一句话转写两次”。
+            context_text: 仅供下一句 prompt 使用的裁剪后文本。
             hallucination_risk: 幻觉风险分数。
+            risk_components: 幻觉风险的底层组件。
             prompt_text: 实际送入 Whisper 的文本提示。
             scores: 对应音频分片的声学分数。
             raw_result: 精简后的原始生成结果。
@@ -91,7 +98,10 @@ class WhisperChunkResult:
         self.min_token_confidence = min_token_confidence
         self.low_conf_token_ratio = low_conf_token_ratio
         self.compression_ratio = compression_ratio
+        self.self_repeat_score = self_repeat_score
+        self.context_text = context_text
         self.hallucination_risk = hallucination_risk
+        self.risk_components = risk_components
         self.prompt_text = prompt_text
         self.scores = scores
         self.raw_result = raw_result or {}
@@ -115,7 +125,10 @@ class WhisperChunkResult:
             "min_token_confidence": self.min_token_confidence,
             "low_conf_token_ratio": self.low_conf_token_ratio,
             "compression_ratio": self.compression_ratio,
+            "self_repeat_score": self.self_repeat_score,
+            "context_text": self.context_text,
             "hallucination_risk": self.hallucination_risk,
+            "risk_components": self.risk_components,
             "prompt_text": self.prompt_text,
             "scores": self.scores,
             "raw_result": self.raw_result,
@@ -374,17 +387,49 @@ class WhisperTranscriber:
         """
         if not chunk.text:
             return False
-        if (chunk.avg_confidence or 0.0) < 0.50:
+        if chunk.hallucination_risk >= 0.42:
             return False
-        if chunk.hallucination_risk > 0.45:
+        if chunk.min_token_confidence is not None and chunk.min_token_confidence < 0.10:
             return False
-        if float(chunk.scores.get("off_center_risk", 0.0)) > 0.35:
-            return False
-        if chunk.min_token_confidence is not None and chunk.min_token_confidence < 0.18:
-            return False
-        if chunk.low_conf_token_ratio is not None and chunk.low_conf_token_ratio > 0.35:
+        if chunk.self_repeat_score > 0.88:
             return False
         return True
+
+    @staticmethod
+    def _trim_repeated_text_for_context(text: str) -> str:
+        """
+        将疑似“整句重复一次”的文本裁成更适合 prompt 的版本。
+
+        参数:
+            text: 原始转写文本。
+
+        说明:
+            这里不会修改最终转写结果，只在构造下一句上下文时使用。
+            如果前后两半高度相似，则仅保留前半段，避免错误上下文连锁传播。
+        """
+        clean = _safe_text(text)
+        if len(clean) < 8:
+            return clean
+
+        best_score = 0.0
+        best_left = clean
+        for split in range(max(3, len(clean) // 3), min(len(clean) - 3, (2 * len(clean)) // 3 + 1)):
+            left = clean[:split].strip()
+            right = clean[split:].strip()
+            if len(left) < 3 or len(right) < 3:
+                continue
+            length_ratio = min(len(left), len(right)) / max(len(left), len(right))
+            if length_ratio < 0.70:
+                continue
+            similarity = SequenceMatcher(None, left, right).ratio()
+            candidate = similarity * length_ratio
+            if candidate > best_score:
+                best_score = candidate
+                best_left = left
+
+        if best_score >= 0.82:
+            return best_left
+        return clean
 
     def build_prompt_text(
         self,
@@ -412,7 +457,7 @@ class WhisperTranscriber:
             for chunk in reversed(previous_chunks):
                 if not self.is_context_usable(chunk):
                     continue
-                usable_previous.append(chunk.text)
+                usable_previous.append(chunk.context_text or chunk.text)
                 if len(usable_previous) >= self.max_previous_chunks:
                     break
             if usable_previous:
@@ -596,38 +641,164 @@ class WhisperTranscriber:
         self,
         text: str,
         avg_confidence: float | None,
+        min_token_confidence: float | None,
+        low_conf_token_ratio: float | None,
         compression_ratio: float,
+        vocal_presence: float,
         off_center_risk: float,
         duration: float,
-    ) -> float:
+    ) -> tuple[float, float, dict]:
         """
         计算片段级幻觉风险。
 
         参数:
             text: 转写文本。
             avg_confidence: 平均置信度。
+            min_token_confidence: 最低 token 置信度。
+            low_conf_token_ratio: 低置信 token 占比。
             compression_ratio: 文本压缩率。
+            vocal_presence: 音频侧人声存在分数。
             off_center_risk: 音频侧偏离中置风险。
             duration: 片段时长。
         """
         clean = _safe_text(text)
         if not clean:
-            return 1.0
+            return 1.0, 0.0, {
+                "avg_confidence_risk": 1.0,
+                "min_token_risk": 1.0,
+                "low_conf_ratio_risk": 1.0,
+                "off_center_risk": 1.0,
+                "presence_risk": 1.0,
+                "self_repeat_risk": 0.0,
+                "compression_risk": 0.0,
+                "density_risk": 0.0,
+            }
 
-        inverse_conf = 1.0 - (avg_confidence if avg_confidence is not None else 0.45)
-        repeat_ratio = self._repeat_ratio(clean)
-        density = len(clean) / max(duration, 1e-6)
-        density_risk = _clamp01((density - 9.0) / 10.0)
+        avg_conf_risk = _clamp01(1.0 - (avg_confidence if avg_confidence is not None else 0.45))
+        min_token_risk = self._min_token_penalty(min_token_confidence)
+        low_conf_ratio_risk = self._low_conf_ratio_penalty(low_conf_token_ratio)
+        self_repeat_score = self._self_repeat_score(clean)
+        density_risk = self._density_penalty(clean, duration)
         compression_risk = _clamp01((compression_ratio - 1.8) / 1.4)
+        off_center_penalty = self._off_center_penalty(off_center_risk)
+        presence_penalty = self._presence_penalty(vocal_presence)
 
+        risk_components = {
+            "avg_confidence_risk": avg_conf_risk,
+            "min_token_risk": min_token_risk,
+            "low_conf_ratio_risk": low_conf_ratio_risk,
+            "off_center_risk": off_center_penalty,
+            "presence_risk": presence_penalty,
+            "self_repeat_risk": self_repeat_score,
+            "compression_risk": compression_risk,
+            "density_risk": density_risk,
+        }
+        top_risks = sorted(risk_components.values(), reverse=True)
         risk = (
-            0.42 * inverse_conf
-            + 0.28 * off_center_risk
-            + 0.17 * compression_risk
-            + 0.08 * repeat_ratio
-            + 0.05 * density_risk
+            0.50 * top_risks[0]
+            + 0.30 * top_risks[1]
+            + 0.20 * top_risks[2]
         )
-        return _clamp01(risk)
+        return _clamp01(risk), self_repeat_score, risk_components
+
+    @staticmethod
+    def _off_center_penalty(off_center_risk: float) -> float:
+        """
+        将保守的 `off_center_risk` 映射为更激进的风险惩罚。
+
+        参数:
+            off_center_risk: 音频侧偏离中置风险。
+        """
+        if off_center_risk <= 0.30:
+            return _clamp01(0.25 * (off_center_risk / 0.30))
+        normalized = (off_center_risk - 0.30) / 0.25
+        return _clamp01(0.25 + 0.75 * (normalized ** 2))
+
+    @staticmethod
+    def _presence_penalty(vocal_presence: float) -> float:
+        """
+        将保守的 `vocal_presence` 映射为更激进的模糊人声惩罚。
+
+        参数:
+            vocal_presence: 音频侧人声存在分数。
+        """
+        if vocal_presence >= 0.70:
+            return 0.0
+        normalized = (0.70 - vocal_presence) / 0.18
+        return _clamp01(normalized ** 2)
+
+    @staticmethod
+    def _min_token_penalty(min_token_confidence: float | None) -> float:
+        """
+        将最低 token 置信度映射为风险。
+
+        参数:
+            min_token_confidence: 最低 token 置信度。
+        """
+        if min_token_confidence is None:
+            return 0.45
+        if min_token_confidence >= 0.45:
+            return 0.0
+        normalized = (0.45 - min_token_confidence) / 0.35
+        return _clamp01(normalized ** 1.6)
+
+    @staticmethod
+    def _low_conf_ratio_penalty(low_conf_token_ratio: float | None) -> float:
+        """
+        将低置信 token 占比映射为风险。
+
+        参数:
+            low_conf_token_ratio: 低置信 token 占比。
+        """
+        if low_conf_token_ratio is None:
+            return 0.35
+        if low_conf_token_ratio <= 0.10:
+            return 0.0
+        normalized = (low_conf_token_ratio - 0.10) / 0.50
+        return _clamp01(normalized ** 1.4)
+
+    @staticmethod
+    def _density_penalty(text: str, duration: float) -> float:
+        """
+        将单位时长文本密度映射为风险。
+
+        参数:
+            text: 转写文本。
+            duration: 片段时长。
+        """
+        density = len(text) / max(duration, 1e-6)
+        return _clamp01((density - 9.0) / 10.0)
+
+    @staticmethod
+    def _self_repeat_score(text: str) -> float:
+        """
+        识别“同一句被 Whisper 连续转写两次”的情况。
+
+        参数:
+            text: 转写文本。
+
+        说明:
+            中文和日语不适合只按空格切词，这里直接在字符串层面检查：
+            如果文本前半段与后半段高度相似，就提高重复分数。
+        """
+        clean = _safe_text(text)
+        if len(clean) < 8:
+            return 0.0
+
+        best_score = 0.0
+        for split in range(max(3, len(clean) // 3), min(len(clean) - 3, (2 * len(clean)) // 3 + 1)):
+            left = clean[:split].strip()
+            right = clean[split:].strip()
+            if len(left) < 3 or len(right) < 3:
+                continue
+            length_ratio = min(len(left), len(right)) / max(len(left), len(right))
+            if length_ratio < 0.70:
+                continue
+            similarity = SequenceMatcher(None, left, right).ratio()
+            candidate = similarity * length_ratio
+            if candidate > best_score:
+                best_score = candidate
+        return _clamp01(best_score)
 
     def transcribe_segment(
         self,
@@ -670,13 +841,17 @@ class WhisperTranscriber:
                 duration=float(segment_data["duration"]),
             )
 
-        hallucination_risk = self.score_hallucination_risk(
+        hallucination_risk, self_repeat_score, risk_components = self.score_hallucination_risk(
             text=text,
             avg_confidence=avg_confidence,
+            min_token_confidence=min_token_confidence,
+            low_conf_token_ratio=low_conf_token_ratio,
             compression_ratio=compression_ratio,
+            vocal_presence=float(scores.get("vocal_presence", 0.0)),
             off_center_risk=float(scores.get("off_center_risk", 0.0)),
             duration=float(segment_data["duration"]),
         )
+        context_text = self._trim_repeated_text_for_context(text)
 
         return WhisperChunkResult(
             segment_index=segment_index,
@@ -693,7 +868,10 @@ class WhisperTranscriber:
             min_token_confidence=min_token_confidence,
             low_conf_token_ratio=low_conf_token_ratio,
             compression_ratio=compression_ratio,
+            self_repeat_score=self_repeat_score,
+            context_text=context_text,
             hallucination_risk=hallucination_risk,
+            risk_components=risk_components,
             prompt_text=prompt_text,
             scores=dict(scores),
             raw_result=raw_result,
