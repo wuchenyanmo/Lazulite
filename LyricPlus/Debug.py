@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torchaudio
 
+from LyricPlus.Align import LyricAlignmentResult
 from LyricPlus.Lyric import LyricLineStamp
 from LyricPlus.Transcribe import WhisperTrackResult
 
@@ -378,3 +379,46 @@ def plot_transcription_profile(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
+
+
+def summarize_alignment(alignment_result: LyricAlignmentResult):
+    """
+    打印歌词约束对齐摘要。
+
+    参数:
+        alignment_result: `LyricAligner.align()` 返回结果。
+    """
+    print(f"music: {alignment_result.music_path}")
+    print(f"stats: {alignment_result.stats}")
+    print("\naligned lines:\n")
+
+    for item in alignment_result.items:
+        print(
+            {
+                "line_index": item.line_index,
+                "time": None if item.start is None else f"{format_time(item.start)} -> {format_time(item.end)}",
+                "chunk_indices": item.chunk_indices,
+                "similarity": round(item.similarity, 3),
+                "score": round(item.score, 3),
+                "confidence": None if item.confidence is None else round(item.confidence, 3),
+                "hallucination_risk": None if item.hallucination_risk is None else round(item.hallucination_risk, 3),
+                "lyric": item.line.text,
+                "chunk_text": item.chunk_text,
+            }
+        )
+
+
+def save_alignment_json(output_path: Path, alignment_result: LyricAlignmentResult):
+    """
+    将歌词约束对齐结果保存为 JSON。
+
+    参数:
+        output_path: 输出文件路径。
+        alignment_result: `LyricAligner.align()` 返回结果。
+    """
+    payload = alignment_result.to_dict()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(make_json_safe(payload), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
