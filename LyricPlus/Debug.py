@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -33,15 +34,48 @@ def format_time_filename(seconds: float) -> str:
     return format_time(seconds).replace(":", "-").replace(".", "_")
 
 
-def load_lyric_hint(lyric_path: str | None):
+def _read_embedded_mp4_lyric(music_path: str | None) -> str | None:
+    """
+    从 m4a 的 `©lyr` 标签读取内嵌歌词。
+
+    参数:
+        music_path: 音频文件路径。
+    """
+    if not music_path:
+        return None
+
+    path = Path(music_path)
+    if path.suffix.lower() != ".m4a" or not path.exists():
+        return None
+
+    from mutagen.mp4 import MP4
+
+    tags = MP4(str(path))
+    values = tags.tags.get("\xa9lyr") if tags.tags else None
+    if not values:
+        return None
+    if isinstance(values, list):
+        values = [str(item).strip() for item in values if str(item).strip()]
+        return "\n".join(values).strip() or None
+    text = str(values).strip()
+    return text or None
+
+
+def load_lyric_hint(lyric_path: str | None, music_path: str | None = None):
     """
     读取可选歌词提示。
 
     参数:
         lyric_path: 歌词文件路径，可为 `.lrc` 或纯文本。
+        music_path: 未传入外部歌词时，用于读取 m4a 内嵌歌词。
     """
     if not lyric_path:
-        return None
+        embedded = _read_embedded_mp4_lyric(music_path)
+        if embedded is None:
+            return None
+        if re.search(r"\[\d{2,}:\d{2}\.\d{2,3}\]", embedded):
+            return LyricLineStamp(embedded)
+        return embedded
 
     path = Path(lyric_path)
     if not path.exists():
@@ -51,6 +85,24 @@ def load_lyric_hint(lyric_path: str | None):
     if path.suffix.lower() == ".lrc":
         return LyricLineStamp(text)
     return text
+
+
+def load_alignment_lyric(lyric_path: str | None, music_path: str | None = None) -> LyricLineStamp | None:
+    """
+    读取用于约束对齐的歌词对象。
+
+    参数:
+        lyric_path: 外部歌词路径，可为空。
+        music_path: 未传入外部歌词时，用于读取 m4a 内嵌歌词。
+    """
+    lyric_data = load_lyric_hint(lyric_path, music_path=music_path)
+    if lyric_data is None:
+        return None
+    if isinstance(lyric_data, LyricLineStamp):
+        return lyric_data
+    if re.search(r"\[\d{2,}:\d{2}\.\d{2,3}\]", lyric_data):
+        return LyricLineStamp(lyric_data)
+    return LyricLineStamp.from_plain_text(lyric_data)
 
 
 def make_json_safe(value):

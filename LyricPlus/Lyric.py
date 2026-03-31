@@ -118,6 +118,30 @@ class LyricLineStamp:
                 self._add_metadata(parsed.metadata_key or 'meta', parsed.metadata_value or parsed.text)
                 continue
 
+    @classmethod
+    def from_plain_text(cls, text: str):
+        """
+        从不带时间戳的纯文本歌词构造歌词对象。
+
+        参数:
+            text: 按行分隔的纯文本歌词。
+
+        说明:
+            这里会为每行生成递增的伪时间戳，仅用于保留歌词顺序，
+            方便后续做约束对齐；这些时间戳不代表真实演唱时间。
+        """
+        lines = []
+        pseudo_time = 0.0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            minute = int(pseudo_time // 60)
+            second = pseudo_time % 60
+            lines.append(f"[{minute:02d}:{second:05.2f}]{line}")
+            pseudo_time += 1.0
+        return cls("\n".join(lines))
+
     @property
     def lyric_lines(self) -> list[LyricTokenLine]:
         """
