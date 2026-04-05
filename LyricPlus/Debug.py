@@ -318,6 +318,8 @@ def summarize_transcription(vocal_result: dict, track_result: WhisperTrackResult
                 "hallucination_risk": round(chunk.hallucination_risk, 3),
                 "risk_components": {k: round(v, 3) for k, v in chunk.risk_components.items()},
                 "token_count": 0 if not chunk.token_confidences else len(chunk.token_confidences),
+                "num_candidates": chunk.raw_result.get("num_candidates", 1),
+                "selected_index": chunk.raw_result.get("selected_index", 0),
                 "prompt_text": chunk.prompt_text,
                 "text": chunk.text,
             }

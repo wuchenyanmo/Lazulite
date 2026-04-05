@@ -221,6 +221,7 @@ class WhisperTranscriber:
         max_prompt_chars: int = 180,
         max_previous_chunks: int = 2,
         max_lyric_hint_chars: int = 80,
+        num_candidates: int = 1,
     ):
         """
         初始化 Whisper 转写器。
@@ -239,6 +240,7 @@ class WhisperTranscriber:
             max_prompt_chars: prompt 总长度上限。
             max_previous_chunks: 最多回看多少个历史片段作为 prompt。
             max_lyric_hint_chars: 歌词提示的长度上限。
+            num_candidates: 同一分片重复转写的候选次数。
         """
         self.model_id = model_id
         self.language = language
@@ -253,6 +255,7 @@ class WhisperTranscriber:
         self.max_prompt_chars = max_prompt_chars
         self.max_previous_chunks = max_previous_chunks
         self.max_lyric_hint_chars = max_lyric_hint_chars
+        self.num_candidates = max(1, int(num_candidates))
 
         self.model = None
         self.processor = None
@@ -276,6 +279,7 @@ class WhisperTranscriber:
 
         self.model = AutoModelForSpeechSeq2Seq.from_pretrained(self.model_id, **model_kwargs)
         self.model.to(self.device)
+        self.model.eval()
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def unload_model(self):
@@ -821,60 +825,116 @@ class WhisperTranscriber:
         scores = segment_data["scores"]
         audio_16k = self.prepare_audio(segment_data["audio"], input_sr=sr)
         generate_kwargs = self._build_generate_kwargs(prompt_text)
+        candidates: list[WhisperChunkResult] = []
+        for candidate_index in range(self.num_candidates):
+            text, avg_logprob, avg_confidence, token_confidences, raw_result = self.compute_generation_result(
+                audio_16k=audio_16k,
+                generate_kwargs=generate_kwargs,
+            )
+            text = text or ""
+            min_token_confidence, low_conf_token_ratio = self.token_confidence_stats(token_confidences)
+            compression_ratio = self._compression_ratio(text)
 
-        text, avg_logprob, avg_confidence, token_confidences, raw_result = self.compute_generation_result(
-            audio_16k=audio_16k,
-            generate_kwargs=generate_kwargs,
-        )
-        text = text or ""
-        min_token_confidence, low_conf_token_ratio = self.token_confidence_stats(token_confidences)
-        compression_ratio = self._compression_ratio(text)
+            confidence_source = "generate_scores"
+            if avg_confidence is None:
+                confidence_source = "heuristic"
+                avg_confidence = self.estimate_confidence(
+                    text=text,
+                    compression_ratio=compression_ratio,
+                    vocal_presence=float(scores.get("vocal_presence", 0.0)),
+                    off_center_risk=float(scores.get("off_center_risk", 0.0)),
+                    duration=float(segment_data["duration"]),
+                )
 
-        confidence_source = "generate_scores"
-        if avg_confidence is None:
-            confidence_source = "heuristic"
-            avg_confidence = self.estimate_confidence(
+            hallucination_risk, self_repeat_score, risk_components = self.score_hallucination_risk(
                 text=text,
+                avg_confidence=avg_confidence,
+                min_token_confidence=min_token_confidence,
+                low_conf_token_ratio=low_conf_token_ratio,
                 compression_ratio=compression_ratio,
                 vocal_presence=float(scores.get("vocal_presence", 0.0)),
                 off_center_risk=float(scores.get("off_center_risk", 0.0)),
                 duration=float(segment_data["duration"]),
             )
+            context_text = self._trim_repeated_text_for_context(text)
+            raw_result = dict(raw_result or {})
+            raw_result["candidate_index"] = candidate_index
 
-        hallucination_risk, self_repeat_score, risk_components = self.score_hallucination_risk(
-            text=text,
-            avg_confidence=avg_confidence,
-            min_token_confidence=min_token_confidence,
-            low_conf_token_ratio=low_conf_token_ratio,
-            compression_ratio=compression_ratio,
-            vocal_presence=float(scores.get("vocal_presence", 0.0)),
-            off_center_risk=float(scores.get("off_center_risk", 0.0)),
-            duration=float(segment_data["duration"]),
+            candidates.append(
+                WhisperChunkResult(
+                    segment_index=segment_index,
+                    start=float(segment_data["start"]),
+                    end=float(segment_data["end"]),
+                    core_start=float(segment_data["core_start"]),
+                    core_end=float(segment_data["core_end"]),
+                    text=text,
+                    language=self.language,
+                    avg_logprob=avg_logprob,
+                    avg_confidence=avg_confidence,
+                    confidence_source=confidence_source,
+                    token_confidences=token_confidences,
+                    min_token_confidence=min_token_confidence,
+                    low_conf_token_ratio=low_conf_token_ratio,
+                    compression_ratio=compression_ratio,
+                    self_repeat_score=self_repeat_score,
+                    context_text=context_text,
+                    hallucination_risk=hallucination_risk,
+                    risk_components=risk_components,
+                    prompt_text=prompt_text,
+                    scores=dict(scores),
+                    raw_result=raw_result,
+                )
+            )
+
+        best_index = self._select_best_candidate_index(candidates)
+        best = candidates[best_index]
+        best.raw_result = dict(best.raw_result or {})
+        best.raw_result["num_candidates"] = len(candidates)
+        best.raw_result["selected_index"] = best_index
+        if len(candidates) > 1:
+            best.raw_result["candidate_texts"] = [candidate.text for candidate in candidates]
+        return best
+
+    @staticmethod
+    def _candidate_quality(candidate: WhisperChunkResult) -> float:
+        """
+        计算候选转写结果的综合质量分数，分数越高越优。
+
+        参数:
+            candidate: 单个候选转写结果。
+        """
+        avg_confidence = float(candidate.avg_confidence or 0.0)
+        avg_logprob = float(candidate.avg_logprob or -10.0)
+        min_token = float(candidate.min_token_confidence or 0.0)
+        low_conf_ratio = float(candidate.low_conf_token_ratio or 0.0)
+        score = (
+            1.15 * avg_confidence
+            + 0.10 * avg_logprob
+            + 0.22 * min_token
+            - 1.25 * float(candidate.hallucination_risk)
+            - 0.24 * float(candidate.self_repeat_score)
+            - 0.16 * low_conf_ratio
         )
-        context_text = self._trim_repeated_text_for_context(text)
+        if not candidate.text:
+            score -= 1.0
+        return score
 
-        return WhisperChunkResult(
-            segment_index=segment_index,
-            start=float(segment_data["start"]),
-            end=float(segment_data["end"]),
-            core_start=float(segment_data["core_start"]),
-            core_end=float(segment_data["core_end"]),
-            text=text,
-            language=self.language,
-            avg_logprob=avg_logprob,
-            avg_confidence=avg_confidence,
-            confidence_source=confidence_source,
-            token_confidences=token_confidences,
-            min_token_confidence=min_token_confidence,
-            low_conf_token_ratio=low_conf_token_ratio,
-            compression_ratio=compression_ratio,
-            self_repeat_score=self_repeat_score,
-            context_text=context_text,
-            hallucination_risk=hallucination_risk,
-            risk_components=risk_components,
-            prompt_text=prompt_text,
-            scores=dict(scores),
-            raw_result=raw_result,
+    def _select_best_candidate_index(self, candidates: list[WhisperChunkResult]) -> int:
+        """
+        在多次转写结果中选出质量最好的候选。
+
+        参数:
+            candidates: 同一分片的多个候选结果。
+        """
+        if not candidates:
+            return 0
+        return max(
+            range(len(candidates)),
+            key=lambda idx: (
+                self._candidate_quality(candidates[idx]),
+                float(candidates[idx].avg_confidence or 0.0),
+                -float(candidates[idx].hallucination_risk),
+            ),
         )
 
     def transcribe_analysis(
