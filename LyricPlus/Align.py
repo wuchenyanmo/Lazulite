@@ -88,16 +88,26 @@ class LyricAlignmentResult:
     整首歌的歌词约束对齐结果。
     """
 
-    def __init__(self, music_path: str, items: list[AlignedLyricLine]):
+    def __init__(
+        self,
+        music_path: str,
+        items: list[AlignedLyricLine],
+        strategy: str = "dp",
+        details: dict | None = None,
+    ):
         """
         初始化整首歌对齐结果。
 
         参数:
             music_path: 原始音频路径。
             items: 行级对齐结果列表。
+            strategy: 当前结果使用的对齐策略。
+            details: 额外调试信息。
         """
         self.music_path = music_path
         self.items = items
+        self.strategy = strategy
+        self.details = details or {}
 
     @property
     def matched_count(self) -> int:
@@ -121,6 +131,7 @@ class LyricAlignmentResult:
             "avg_similarity": float(np.mean(similarities)) if similarities else None,
             "avg_score": float(np.mean(scores)) if scores else None,
             "avg_confidence": float(np.mean(confidences)) if confidences else None,
+            "strategy": self.strategy,
         }
 
     def to_dict(self) -> dict:
@@ -129,7 +140,9 @@ class LyricAlignmentResult:
         """
         return {
             "music_path": self.music_path,
+            "strategy": self.strategy,
             "stats": self.stats,
+            "details": self.details,
             "items": [item.to_dict() for item in self.items],
         }
 
@@ -215,6 +228,7 @@ class LyricAligner:
             chunk_list.append(
                 WhisperChunkResult(
                     segment_index=item["segment_index"],
+                    section_index=item.get("section_index"),
                     start=item["start"],
                     end=item["end"],
                     core_start=item["core_start"],

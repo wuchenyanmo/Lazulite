@@ -344,9 +344,83 @@ def save_transcription_json(output_path: Path, vocal_result: dict, track_result:
         "sr": vocal_result["sr"],
         "is_vocal": vocal_result["is_vocal"],
         "vocal_time": vocal_result["vocal_time"],
+        "section_count": len(vocal_result.get("sections", [])),
         "segment_count": len(vocal_result["segments"]),
         "transcription": transcription,
     }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(make_json_safe(payload), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def save_offset_debug_json(
+    output_path: Path,
+    vocal_result: dict,
+    lyric,
+    track_result: WhisperTrackResult | None,
+    alignment_result=None,
+    selected_segment_indices: set[int] | None = None,
+    mode: str = "offset-only",
+    fallback_to: str | None = None,
+):
+    """
+    将 offset 路径的调试信息保存为独立 JSON。
+
+    参数:
+        output_path: 输出文件路径。
+        vocal_result: `VocalAnalyzer` 分析结果字典。
+        lyric: 歌词对象。
+        track_result: offset 路径的转写结果。
+        alignment_result: offset 路径的对齐结果。
+        selected_segment_indices: 参与 offset 转写的 segment 序号集合。
+        mode: 当前运行模式。
+        fallback_to: 若 auto 模式回退，记录回退目标策略。
+    """
+    selected_segment_indices = set(selected_segment_indices or set())
+    sections = vocal_result.get("sections", [])
+    segments = vocal_result.get("segments", [])
+    section_index_by_segment = {}
+    for section in sections:
+        for segment_index in section.get("segment_indices", []):
+            section_index_by_segment[int(segment_index)] = section.get("section_index")
+
+    segment_debug = []
+    for index, segment in enumerate(segments, start=1):
+        segment_debug.append(
+            {
+                "segment_index": index,
+                "section_index": section_index_by_segment.get(index),
+                "selected_for_offset": index in selected_segment_indices,
+                "start": segment.get("start"),
+                "end": segment.get("end"),
+                "core_start": segment.get("core_start"),
+                "core_end": segment.get("core_end"),
+                "duration": segment.get("duration"),
+                "core_duration": segment.get("core_duration"),
+                "scores": segment.get("scores", {}),
+                "features": segment.get("features", {}),
+            }
+        )
+
+    payload = {
+        "music_path": vocal_result.get("music_path", ""),
+        "mode": mode,
+        "fallback_to": fallback_to,
+        "sr": vocal_result.get("sr"),
+        "original_section_count": len(sections),
+        "segment_count": len(segments),
+        "lyric_line_count": len(getattr(lyric, "lyric_lines", [])),
+        "selected_segment_indices": sorted(selected_segment_indices),
+        "original_sections": sections,
+        "segments": segment_debug,
+        "offset_transcription": None if track_result is None else track_result.to_dict(),
+        "offset_alignment": None if alignment_result is None else alignment_result.to_dict(),
+    }
+    if alignment_result is not None:
+        details = getattr(alignment_result, "details", {}) or {}
+        payload["merged_section_count"] = len(details.get("merged_sections", []))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(make_json_safe(payload), ensure_ascii=False, indent=2),

@@ -119,6 +119,46 @@ class VocalSegment:
         }
 
 
+class VocalSection:
+    """
+    第一次分片得到的长乐段对象。
+    """
+
+    def __init__(
+        self,
+        section_index: int,
+        start: float,
+        end: float,
+        segment_indices: list[int],
+    ):
+        """
+        初始化长乐段对象。
+
+        参数:
+            section_index: 长乐段序号。
+            start: 长乐段开始时间，单位秒。
+            end: 长乐段结束时间，单位秒。
+            segment_indices: 落在该长乐段中的细分片段序号列表。
+        """
+        self.section_index = section_index
+        self.start = start
+        self.end = end
+        self.duration = end - start
+        self.segment_indices = segment_indices
+
+    def to_dict(self) -> dict:
+        """
+        将长乐段对象转换为字典。
+        """
+        return {
+            "section_index": self.section_index,
+            "start": self.start,
+            "end": self.end,
+            "duration": self.duration,
+            "segment_indices": self.segment_indices,
+        }
+
+
 class VocalAnalysisResult:
     """
     整首歌的人声分析结果对象。
@@ -133,6 +173,7 @@ class VocalAnalysisResult:
         main_vocal: np.ndarray,
         vocals_stereo: np.ndarray,
         activity_profile: dict,
+        sections: list[VocalSection],
         segments: list[VocalSegment],
     ):
         """
@@ -146,6 +187,7 @@ class VocalAnalysisResult:
             main_vocal: 主唱增强后的单声道音频。
             vocals_stereo: Demucs 分离后的人声双声道。
             activity_profile: 帧级分析特征。
+            sections: 第一次分片得到的长乐段列表。
             segments: 分片结果列表。
         """
         self.music_path = music_path
@@ -155,6 +197,7 @@ class VocalAnalysisResult:
         self.main_vocal = main_vocal
         self.vocals_stereo = vocals_stereo
         self.activity_profile = activity_profile
+        self.sections = sections
         self.segments = segments
 
     def to_dict(self) -> dict:
@@ -169,6 +212,7 @@ class VocalAnalysisResult:
             "main_vocal": self.main_vocal,
             "vocals_stereo": self.vocals_stereo,
             "activity_profile": self.activity_profile,
+            "sections": [section.to_dict() for section in self.sections],
             "segments": [segment.to_dict() for segment in self.segments],
         }
 
@@ -560,17 +604,13 @@ class VocalAnalyzer:
 
         return intervals
 
-    def segment_activity_frames(self, activity: np.ndarray, split_activity: np.ndarray, sr: int) -> list[tuple[int, int]]:
+    def _initial_segment_intervals(self, activity: np.ndarray, sr: int) -> list[tuple[int, int]]:
         """
-        根据 activity 曲线生成初始分片区间。
+        先用双阈值和短停顿合并得到长乐段级区间。
 
         参数:
             activity: 帧级 activity 曲线。
-            split_activity: 更平滑的断句曲线。
             sr: 采样率。
-
-        说明:
-            先用双阈值滞回找核心区间，再合并极短停顿，最后对过长区间做二次断句。
         """
         high_mask = activity >= self.enter_threshold
         low_mask = activity >= self.keep_threshold
@@ -598,12 +638,30 @@ class VocalAnalyzer:
                 merged.append((start, end))
 
         min_frames = int(round(self.min_segment_sec * sr / self.hop_length))
-        filtered = [(start, end) for start, end in merged if end - start >= max(min_frames, 1)]
+        return [(start, end) for start, end in merged if end - start >= max(min_frames, 1)]
 
+    def segment_activity_frames(
+        self,
+        activity: np.ndarray,
+        split_activity: np.ndarray,
+        sr: int,
+    ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+        """
+        根据 activity 曲线生成长乐段区间和细分分片区间。
+
+        参数:
+            activity: 帧级 activity 曲线。
+            split_activity: 更平滑的断句曲线。
+            sr: 采样率。
+
+        说明:
+            先保留第一次分片得到的长乐段，再对每个长乐段做二次断句。
+        """
+        coarse_intervals = self._initial_segment_intervals(activity=activity, sr=sr)
         refined = []
-        for start, end in filtered:
+        for start, end in coarse_intervals:
             refined.extend(self.split_long_interval(start, end, activity, split_activity, sr))
-        return refined
+        return coarse_intervals, refined
 
     def score_segment(
         self,
@@ -675,7 +733,7 @@ class VocalAnalyzer:
             core_samples=(core_start, core_end),
         )
 
-    def segment_vocals_soft(self, vocals: np.ndarray, sr: int) -> tuple[list[VocalSegment], dict]:
+    def segment_vocals_soft(self, vocals: np.ndarray, sr: int) -> tuple[list[VocalSection], list[VocalSegment], dict]:
         """
         对分离后的人声做细粒度切片，并计算每个片段的分数。
 
@@ -691,26 +749,51 @@ class VocalAnalyzer:
             main_vocal, mid, side = self.extract_main_vocal(vocals)
 
         activity_profile = self.build_activity_profile(main_vocal=main_vocal, mid=mid, side=side, sr=sr)
-        intervals = self.segment_activity_frames(
+        coarse_intervals, _ = self.segment_activity_frames(
             activity=activity_profile["activity"],
             split_activity=activity_profile["split_activity"],
             sr=sr,
         )
 
+        sections = []
         segments = []
-        for start_frame, end_frame in intervals:
-            start_sample = int(start_frame * self.hop_length)
-            end_sample = int(end_frame * self.hop_length)
-            segment = self.score_segment(
-                main_vocal=main_vocal,
-                sr=sr,
-                start_sample=start_sample,
-                end_sample=end_sample,
-                activity_profile=activity_profile,
+        for section_index, (coarse_start, coarse_end) in enumerate(coarse_intervals, start=1):
+            section_segment_indices = []
+            refined_intervals = self.split_long_interval(
+                coarse_start,
+                coarse_end,
+                activity_profile["activity"],
+                activity_profile["split_activity"],
+                sr,
             )
-            if segment.duration >= self.min_segment_sec:
+            for start_frame, end_frame in refined_intervals:
+                start_sample = int(start_frame * self.hop_length)
+                end_sample = int(end_frame * self.hop_length)
+                segment = self.score_segment(
+                    main_vocal=main_vocal,
+                    sr=sr,
+                    start_sample=start_sample,
+                    end_sample=end_sample,
+                    activity_profile=activity_profile,
+                )
+                if segment.duration < self.min_segment_sec:
+                    continue
                 segments.append(segment)
-        return segments, activity_profile
+                section_segment_indices.append(len(segments))
+
+            if not section_segment_indices:
+                continue
+
+            sections.append(
+                VocalSection(
+                    section_index=section_index,
+                    start=coarse_start * self.hop_length / sr,
+                    end=coarse_end * self.hop_length / sr,
+                    segment_indices=section_segment_indices,
+                )
+            )
+
+        return sections, segments, activity_profile
 
     def analyze_file(self, music_path: str) -> VocalAnalysisResult:
         """
@@ -720,7 +803,7 @@ class VocalAnalyzer:
             music_path: 音频文件路径。
         """
         separated = self.separate_vocals_file(music_path)
-        segments, activity_profile = self.segment_vocals_soft(separated["vocals_stereo"], sr=separated["sr"])
+        sections, segments, activity_profile = self.segment_vocals_soft(separated["vocals_stereo"], sr=separated["sr"])
         is_vocal, vocal_time = self.has_vocals_from_array(
             separated["main_vocal"],
             sr=separated["sr"],
@@ -734,5 +817,6 @@ class VocalAnalyzer:
             main_vocal=separated["main_vocal"],
             vocals_stereo=separated["vocals_stereo"],
             activity_profile=activity_profile,
+            sections=sections,
             segments=segments,
         )

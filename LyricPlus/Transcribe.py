@@ -37,6 +37,7 @@ class WhisperChunkResult:
     def __init__(
         self,
         segment_index: int,
+        section_index: int | None,
         start: float,
         end: float,
         core_start: float,
@@ -63,6 +64,7 @@ class WhisperChunkResult:
 
         参数:
             segment_index: 分片序号。
+            section_index: 所属长乐段序号。
             start: 分片开始时间，单位秒。
             end: 分片结束时间，单位秒。
             core_start: 核心区间开始时间，单位秒。
@@ -85,6 +87,7 @@ class WhisperChunkResult:
             raw_result: 精简后的原始生成结果。
         """
         self.segment_index = segment_index
+        self.section_index = section_index
         self.start = start
         self.end = end
         self.core_start = core_start
@@ -126,6 +129,7 @@ class WhisperChunkResult:
         """
         return {
             "segment_index": self.segment_index,
+            "section_index": self.section_index,
             "start": self.start,
             "end": self.end,
             "core_start": self.core_start,
@@ -660,7 +664,16 @@ class WhisperTranscriber:
                     }
                 )
 
-            tokens = self._extract_token_timestamps(outputs, generated_ids, token_texts, tokens)
+            recovered_token_texts = self._recover_token_texts_from_sequence(generated_ids)
+            usable_text_count = min(len(tokens), len(recovered_token_texts))
+            for idx in range(usable_text_count):
+                tokens[idx]["token"] = recovered_token_texts[idx]
+                tokens[idx]["text"] = recovered_token_texts[idx]
+
+            if self.enable_token_timestamps:
+                timestamped_tokens = self._extract_token_timestamps(outputs, generated_ids, recovered_token_texts, tokens)
+                if timestamped_tokens is not None:
+                    tokens = timestamped_tokens
             avg_logprob = float(np.mean(token_logprobs)) if token_logprobs else None
             avg_confidence = float(np.clip(np.exp(avg_logprob), 0.0, 1.0)) if avg_logprob is not None else None
             return decoded_text, avg_logprob, avg_confidence, tokens, {"text": decoded_text}
@@ -1065,6 +1078,7 @@ class WhisperTranscriber:
         segment: VocalSegment | dict,
         sr: int,
         segment_index: int,
+        section_index: int | None = None,
         prompt_text: str = "",
     ) -> WhisperChunkResult:
         """
@@ -1074,6 +1088,7 @@ class WhisperTranscriber:
             segment: 来自 `VocalAnalyzer` 的分片对象。
             sr: 原始采样率。
             segment_index: 分片序号。
+            section_index: 所属长乐段序号。
             prompt_text: 文本提示。
         """
         self.load_model()
@@ -1128,6 +1143,7 @@ class WhisperTranscriber:
             candidates.append(
                 WhisperChunkResult(
                     segment_index=segment_index,
+                    section_index=section_index,
                     start=float(segment_data["start"]),
                     end=float(segment_data["end"]),
                     core_start=float(segment_data["core_start"]),
@@ -1206,6 +1222,7 @@ class WhisperTranscriber:
         self,
         analysis_result: VocalAnalysisResult | dict,
         lyric_hint=None,
+        segment_indices: set[int] | None = None,
     ) -> WhisperTrackResult:
         """
         对 `VocalAnalyzer` 的分析结果做批量分片转写。
@@ -1213,6 +1230,7 @@ class WhisperTranscriber:
         参数:
             analysis_result: `VocalAnalyzer.analyze_file()` 的结果对象或字典。
             lyric_hint: 可选的轻量歌词提示。
+            segment_indices: 若指定，则仅转写这些 1-based segment 序号。
         """
         if isinstance(analysis_result, VocalAnalysisResult):
             data = analysis_result.to_dict()
@@ -1222,9 +1240,16 @@ class WhisperTranscriber:
         previous_chunks: list[WhisperChunkResult] = []
         chunk_results: list[WhisperChunkResult] = []
         segments = data.get("segments", [])
+        sections = data.get("sections", [])
         sr = int(data["sr"])
+        section_index_by_segment: dict[int, int] = {}
+        for section in sections:
+            for item in section.get("segment_indices", []):
+                section_index_by_segment[int(item)] = int(section.get("section_index", 0) or 0)
 
         for index, segment in enumerate(segments, start=1):
+            if segment_indices is not None and index not in segment_indices:
+                continue
             scores = segment.get("scores", {})
             if float(scores.get("vocal_presence", 0.0)) < self.min_presence:
                 continue
@@ -1240,6 +1265,7 @@ class WhisperTranscriber:
                 segment=segment,
                 sr=sr,
                 segment_index=index,
+                section_index=section_index_by_segment.get(index) or None,
                 prompt_text=prompt_text,
             )
             chunk_results.append(chunk)
