@@ -224,7 +224,7 @@ class LyricAligner:
                     avg_logprob=item.get("avg_logprob"),
                     avg_confidence=item.get("avg_confidence"),
                     confidence_source=item.get("confidence_source", ""),
-                    token_confidences=item.get("token_confidences"),
+                    tokens=item.get("tokens") or LyricAligner._merge_legacy_tokens(item),
                     min_token_confidence=item.get("min_token_confidence"),
                     low_conf_token_ratio=item.get("low_conf_token_ratio"),
                     compression_ratio=item.get("compression_ratio", 1.0),
@@ -238,6 +238,201 @@ class LyricAligner:
                 )
             )
         return music_path, chunk_list
+
+    @staticmethod
+    def _merge_legacy_tokens(item: dict) -> list[dict] | None:
+        """
+        将旧版分开的 token 字段合并成统一结构。
+
+        参数:
+            item: chunk 字典。
+        """
+        confidences = item.get("token_confidences") or []
+        timestamps = item.get("token_timestamps") or []
+        if not confidences and not timestamps:
+            return None
+
+        merged = []
+        usable_count = max(len(confidences), len(timestamps))
+        for idx in range(usable_count):
+            info = {}
+            if idx < len(confidences):
+                info.update(confidences[idx] or {})
+            if idx < len(timestamps):
+                info.update(timestamps[idx] or {})
+            merged.append(info)
+        return merged
+
+    @staticmethod
+    def _merge_penalty(line_count: int, chunk_count: int) -> float:
+        """
+        计算窗口合并惩罚。
+
+        参数:
+            line_count: 歌词行数。
+            chunk_count: 转写 chunk 数。
+        """
+        penalty = 0.0
+        if line_count > 1:
+            penalty += 0.05 * (line_count - 1)
+        if chunk_count > 1:
+            penalty += 0.04 * (chunk_count - 1)
+        return penalty
+
+    @staticmethod
+    def _join_token_texts(entries: list[dict]) -> str:
+        """
+        将 token 条目拼成可用于匹配的文本。
+
+        参数:
+            entries: token 条目列表。
+        """
+        text = "".join(str(entry.get("text", entry.get("token", ""))) for entry in entries)
+        return " ".join(text.strip().split())
+
+    @staticmethod
+    def _ordered_unique(values: list[int]) -> list[int]:
+        """
+        按原顺序去重。
+
+        参数:
+            values: 整数列表。
+        """
+        seen = set()
+        result = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
+
+    def _flatten_chunk_token_entries(self, chunks: list[WhisperChunkResult]) -> list[dict]:
+        """
+        将若干 chunk 的 token 时间戳展开成带绝对时间的统一序列。
+
+        参数:
+            chunks: 连续转写 chunk 列表。
+        """
+        entries: list[dict] = []
+        for chunk in chunks:
+            token_entries = chunk.token_timestamps or []
+            if token_entries:
+                for item in token_entries:
+                    text = str(item.get("text", item.get("token", "")))
+                    if text.startswith("<|") and text.endswith("|>"):
+                        continue
+                    if not text.strip():
+                        continue
+                    start = item.get("start")
+                    end = item.get("end")
+                    if start is None and end is None:
+                        continue
+                    start = float(chunk.start if start is None else chunk.start + float(start))
+                    end = float(start if end is None else chunk.start + float(end))
+                    if end < start:
+                        end = start
+                    entries.append(
+                        {
+                            "segment_index": chunk.segment_index,
+                            "token_id": item.get("token_id"),
+                            "token": item.get("token", text),
+                            "text": text,
+                            "start": start,
+                            "end": end,
+                        }
+                    )
+                continue
+
+            if chunk.text:
+                entries.append(
+                    {
+                        "segment_index": chunk.segment_index,
+                        "token_id": None,
+                        "token": chunk.text,
+                        "text": chunk.text,
+                        "start": float(chunk.start),
+                        "end": float(chunk.end),
+                    }
+                )
+        return entries
+
+    def _best_token_boundary_split(
+        self,
+        lyric_lines: list[LyricTokenLine],
+        chunks: list[WhisperChunkResult],
+        confidence: float,
+        hallucination: float,
+        presence: float,
+        off_center: float,
+    ) -> dict | None:
+        """
+        在 token 边界上为两行歌词寻找最佳切点。
+
+        参数:
+            lyric_lines: 连续歌词行列表，仅支持两行。
+            chunks: 连续转写 chunk 列表。
+            confidence: 窗口平均置信度。
+            hallucination: 窗口平均幻觉风险。
+            presence: 窗口平均人声存在分数。
+            off_center: 窗口平均偏离中置风险。
+        """
+        if len(lyric_lines) != 2:
+            return None
+
+        token_entries = self._flatten_chunk_token_entries(chunks)
+        if len(token_entries) < 2:
+            return None
+
+        merge_penalty = self._merge_penalty(len(lyric_lines), len(chunks))
+        best: dict | None = None
+        for split_idx in range(1, len(token_entries)):
+            left_entries = token_entries[:split_idx]
+            right_entries = token_entries[split_idx:]
+            left_text = self._join_token_texts(left_entries)
+            right_text = self._join_token_texts(right_entries)
+            if not left_text or not right_text:
+                continue
+
+            left_similarity = self.text_similarity(lyric_lines[0].normalized_text, left_text)
+            right_similarity = self.text_similarity(lyric_lines[1].normalized_text, right_text)
+            score = (
+                1.22 * left_similarity
+                + 1.22 * right_similarity
+                + 0.16 * confidence
+                + 0.08 * presence
+                - 0.40 * hallucination
+                - 0.10 * off_center
+                - merge_penalty
+            )
+            if min(left_similarity, right_similarity) < self.min_match_similarity:
+                score -= 0.32
+
+            line_assignments = [
+                {
+                    "chunk_indices": self._ordered_unique([entry["segment_index"] for entry in left_entries]),
+                    "chunk_text": left_text,
+                    "start": float(left_entries[0]["start"]),
+                    "end": float(left_entries[-1]["end"]),
+                    "similarity": left_similarity,
+                },
+                {
+                    "chunk_indices": self._ordered_unique([entry["segment_index"] for entry in right_entries]),
+                    "chunk_text": right_text,
+                    "start": float(right_entries[0]["start"]),
+                    "end": float(right_entries[-1]["end"]),
+                    "similarity": right_similarity,
+                },
+            ]
+            similarity = float((left_similarity + right_similarity) / 2.0)
+            candidate = {
+                "score": score,
+                "similarity": similarity,
+                "line_assignments": line_assignments,
+            }
+            if best is None or candidate["score"] > best["score"]:
+                best = candidate
+        return best
 
     def text_similarity(self, lyric_text: str, chunk_text: str) -> float:
         """
@@ -276,7 +471,7 @@ class LyricAligner:
         self,
         lyric_lines: list[LyricTokenLine],
         chunks: list[WhisperChunkResult],
-    ) -> tuple[float, float]:
+    ) -> dict:
         """
         计算“若干歌词行”和“若干转写 chunk”之间的匹配分数。
 
@@ -301,11 +496,7 @@ class LyricAligner:
 
         line_count = len(lyric_lines)
         chunk_count = len(chunks)
-        merge_penalty = 0.0
-        if line_count > 1:
-            merge_penalty += 0.05 * (line_count - 1)
-        if chunk_count > 1:
-            merge_penalty += 0.04 * (chunk_count - 1)
+        merge_penalty = self._merge_penalty(line_count, chunk_count)
 
         score = (
             1.55 * similarity
@@ -317,7 +508,24 @@ class LyricAligner:
         )
         if similarity < self.min_match_similarity:
             score -= 0.32
-        return score, similarity
+
+        match_info = {
+            "score": score,
+            "similarity": similarity,
+            "line_assignments": None,
+        }
+        if line_count == 2:
+            split_match = self._best_token_boundary_split(
+                lyric_lines=lyric_lines,
+                chunks=chunks,
+                confidence=confidence,
+                hallucination=hallucination,
+                presence=presence,
+                off_center=off_center,
+            )
+            if split_match is not None and split_match["score"] > match_info["score"]:
+                match_info = split_match
+        return match_info
 
     @staticmethod
     def _distribute_line_times(
@@ -397,8 +605,8 @@ class LyricAligner:
                     for chunk_span in range(1, max_chunk_span + 1):
                         lyric_window = lyric_lines[i:i + line_span]
                         chunk_window = chunk_list[j:j + chunk_span]
-                        match_value, similarity = self._window_match_score(lyric_window, chunk_window)
-                        next_score = current + match_value
+                        match_info = self._window_match_score(lyric_window, chunk_window)
+                        next_score = current + match_info["score"]
                         if next_score > dp[i + line_span][j + chunk_span]:
                             dp[i + line_span][j + chunk_span] = next_score
                             back[i + line_span][j + chunk_span] = (
@@ -407,8 +615,7 @@ class LyricAligner:
                                 j,
                                 line_span,
                                 chunk_span,
-                                match_value,
-                                similarity,
+                                match_info,
                             )
 
         assignments: list[dict | None] = [None] * n
@@ -417,8 +624,9 @@ class LyricAligner:
             step = back[i][j]
             if step is None:
                 break
-            action, prev_i, prev_j, line_span, chunk_span, match_value, similarity = step
+            action, prev_i, prev_j, line_span, chunk_span, *payload = step
             if action == "match":
+                match_info = payload[0]
                 lines = lyric_lines[prev_i:i]
                 chunks = chunk_list[prev_j:j]
                 chunk_indices = [chunk.segment_index for chunk in chunks]
@@ -427,8 +635,22 @@ class LyricAligner:
                 end = chunks[-1].end if chunks else None
                 confidence = self._mean([chunk.avg_confidence for chunk in chunks])
                 hallucination = self._mean([chunk.hallucination_risk for chunk in chunks])
+                match_value = float(match_info["score"])
+                similarity = float(match_info["similarity"])
 
-                if line_span == 1:
+                if match_info.get("line_assignments"):
+                    for offset, line_assignment in enumerate(match_info["line_assignments"]):
+                        assignments[prev_i + offset] = {
+                            "chunk_indices": line_assignment["chunk_indices"],
+                            "chunk_text": line_assignment["chunk_text"],
+                            "start": line_assignment["start"],
+                            "end": line_assignment["end"],
+                            "similarity": line_assignment["similarity"],
+                            "score": match_value / max(line_span, 1),
+                            "confidence": confidence,
+                            "hallucination_risk": hallucination,
+                        }
+                elif line_span == 1:
                     assignments[prev_i] = {
                         "chunk_indices": chunk_indices,
                         "chunk_text": chunk_text,

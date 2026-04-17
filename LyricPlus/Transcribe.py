@@ -46,7 +46,7 @@ class WhisperChunkResult:
         avg_logprob: float | None,
         avg_confidence: float | None,
         confidence_source: str,
-        token_confidences: list[dict] | None,
+        tokens: list[dict] | None,
         min_token_confidence: float | None,
         low_conf_token_ratio: float | None,
         compression_ratio: float,
@@ -72,7 +72,7 @@ class WhisperChunkResult:
             avg_logprob: 片段平均对数概率。
             avg_confidence: 片段平均置信度。
             confidence_source: 置信度来源。
-            token_confidences: token 级置信度列表。
+            tokens: token 级详情列表，每个元素同时包含文本、置信度和时间戳。
             min_token_confidence: 最低 token 置信度。
             low_conf_token_ratio: 低置信 token 占比。
             compression_ratio: 文本压缩率。
@@ -94,7 +94,7 @@ class WhisperChunkResult:
         self.avg_logprob = avg_logprob
         self.avg_confidence = avg_confidence
         self.confidence_source = confidence_source
-        self.token_confidences = token_confidences
+        self.tokens = tokens
         self.min_token_confidence = min_token_confidence
         self.low_conf_token_ratio = low_conf_token_ratio
         self.compression_ratio = compression_ratio
@@ -105,6 +105,20 @@ class WhisperChunkResult:
         self.prompt_text = prompt_text
         self.scores = scores
         self.raw_result = raw_result or {}
+
+    @property
+    def token_confidences(self) -> list[dict] | None:
+        """
+        兼容旧字段，返回 token 列表。
+        """
+        return self.tokens
+
+    @property
+    def token_timestamps(self) -> list[dict] | None:
+        """
+        兼容旧字段，返回 token 列表。
+        """
+        return self.tokens
 
     def to_dict(self) -> dict:
         """
@@ -121,7 +135,7 @@ class WhisperChunkResult:
             "avg_logprob": self.avg_logprob,
             "avg_confidence": self.avg_confidence,
             "confidence_source": self.confidence_source,
-            "token_confidences": self.token_confidences,
+            "tokens": self.tokens,
             "min_token_confidence": self.min_token_confidence,
             "low_conf_token_ratio": self.low_conf_token_ratio,
             "compression_ratio": self.compression_ratio,
@@ -222,6 +236,8 @@ class WhisperTranscriber:
         max_previous_chunks: int = 2,
         max_lyric_hint_chars: int = 80,
         num_candidates: int = 1,
+        enable_token_timestamps: bool = True,
+        disable_prompt_for_token_timestamps: bool = True,
         low_memory_mode: bool = False,
     ):
         """
@@ -242,6 +258,10 @@ class WhisperTranscriber:
             max_previous_chunks: 最多回看多少个历史片段作为 prompt。
             max_lyric_hint_chars: 歌词提示的长度上限。
             num_candidates: 同一分片重复转写的候选次数。
+            enable_token_timestamps: 是否在同一次生成中请求 token 级时间戳。
+            disable_prompt_for_token_timestamps: 是否在请求 token 时间戳时自动禁用 prompt；
+                当前 transformers 的 Whisper 在 `prompt_ids + return_token_timestamps=True`
+                组合下可能返回全 0 时间戳，因此默认关闭 prompt 以优先保证时间戳可用。
             low_memory_mode: 是否启用低显存模式；启用后在整条链路结束时建议主动卸载 Whisper。
         """
         self.model_id = model_id
@@ -258,6 +278,8 @@ class WhisperTranscriber:
         self.max_previous_chunks = max_previous_chunks
         self.max_lyric_hint_chars = max_lyric_hint_chars
         self.num_candidates = max(1, int(num_candidates))
+        self.enable_token_timestamps = enable_token_timestamps
+        self.disable_prompt_for_token_timestamps = disable_prompt_for_token_timestamps
         self.low_memory_mode = low_memory_mode
 
         self.model = None
@@ -509,7 +531,8 @@ class WhisperTranscriber:
         }
         if self.language:
             generate_kwargs["language"] = self.language
-        if prompt_text and self.processor is not None and hasattr(self.processor, "get_prompt_ids"):
+        can_use_prompt = not (self.enable_token_timestamps and self.disable_prompt_for_token_timestamps)
+        if can_use_prompt and prompt_text and self.processor is not None and hasattr(self.processor, "get_prompt_ids"):
             try:
                 prompt_ids = self.processor.get_prompt_ids(prompt_text, return_tensors="pt")
                 if isinstance(prompt_ids, torch.Tensor):
@@ -576,22 +599,33 @@ class WhisperTranscriber:
 
         try:
             with torch.inference_mode():
-                inputs = self.processor(audio_16k, sampling_rate=16000, return_tensors="pt")
+                inputs = self.processor(
+                    audio_16k,
+                    sampling_rate=16000,
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                )
                 input_features = inputs.get("input_features")
+                attention_mask = inputs.get("attention_mask")
                 if input_features is None:
                     return None, None, None, None, None
                 input_features = input_features.to(self.device, dtype=self.torch_dtype)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(self.device)
 
+                generate_kwargs_with_timestamps = dict(generate_kwargs)
+                generate_kwargs_with_timestamps["return_token_timestamps"] = self.enable_token_timestamps
                 outputs = self.model.generate(
                     input_features=input_features,
+                    attention_mask=attention_mask,
                     max_new_tokens=self.max_new_tokens,
                     output_scores=True,
                     return_dict_in_generate=True,
-                    **generate_kwargs,
+                    **generate_kwargs_with_timestamps,
                 )
 
-            sequences = getattr(outputs, "sequences", None)
-            scores = getattr(outputs, "scores", None)
+            sequences = self._extract_generate_field(outputs, "sequences")
+            scores = self._extract_generate_field(outputs, "scores")
             if sequences is None or not scores:
                 return None, None, None, None, None
 
@@ -604,26 +638,32 @@ class WhisperTranscriber:
 
             generated_ids = sequences[0, -len(scores):]
             token_logprobs = []
-            token_confidences = []
+            tokens = []
+            token_texts = []
             for step_index, step_scores in enumerate(scores):
                 token_id = int(generated_ids[step_index])
                 step_log_probs = torch.log_softmax(step_scores[0], dim=-1)
                 token_logprob = float(step_log_probs[token_id].detach().cpu())
                 token_confidence = float(np.clip(np.exp(token_logprob), 0.0, 1.0))
                 token_text = self.processor.tokenizer.decode([token_id], skip_special_tokens=False)
+                token_texts.append(token_text)
                 token_logprobs.append(token_logprob)
-                token_confidences.append(
+                tokens.append(
                     {
                         "token_id": token_id,
                         "token": token_text,
+                        "text": token_text,
                         "logprob": token_logprob,
                         "confidence": token_confidence,
+                        "start": None,
+                        "end": None,
                     }
                 )
 
+            tokens = self._extract_token_timestamps(outputs, generated_ids, token_texts, tokens)
             avg_logprob = float(np.mean(token_logprobs)) if token_logprobs else None
             avg_confidence = float(np.clip(np.exp(avg_logprob), 0.0, 1.0)) if avg_logprob is not None else None
-            return decoded_text, avg_logprob, avg_confidence, token_confidences, {"text": decoded_text}
+            return decoded_text, avg_logprob, avg_confidence, tokens, {"text": decoded_text}
         except Exception:
             return None, None, None, None, None
         finally:
@@ -631,18 +671,224 @@ class WhisperTranscriber:
                 torch.cuda.empty_cache()
 
     @staticmethod
-    def token_confidence_stats(token_confidences: list[dict] | None) -> tuple[float | None, float | None]:
+    def _extract_generate_field(outputs, key: str):
+        """
+        从 `generate()` 返回结果中提取字段，兼容对象和字典两种形式。
+
+        参数:
+            outputs: `generate()` 的返回值。
+            key: 字段名。
+        """
+        if outputs is None:
+            return None
+        if isinstance(outputs, dict):
+            return outputs.get(key)
+        return getattr(outputs, key, None)
+
+    @staticmethod
+    def _to_python_list(value):
+        """
+        将张量或数组安全转换成 Python 列表。
+
+        参数:
+            value: 待转换对象。
+        """
+        if value is None:
+            return None
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().tolist()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return None
+
+    def _extract_token_timestamps(
+        self,
+        outputs,
+        generated_ids: torch.Tensor,
+        token_texts: list[str],
+        tokens: list[dict],
+    ) -> list[dict] | None:
+        """
+        从 Whisper 生成结果中提取 token 级时间戳。
+
+        参数:
+            outputs: `generate()` 返回值。
+            generated_ids: 当前片段生成出的 token id 序列。
+            token_texts: 与生成 token 对应的解码文本。
+            tokens: 与生成 token 对应的初始详情信息。
+
+        说明:
+            这里优先读取 `generate(return_token_timestamps=True)` 返回的时间戳；
+            若当前 transformers 版本没有直接暴露该字段，则再尝试用 tokenizer offsets 兜底。
+        """
+        raw_timestamps = self._extract_generate_field(outputs, "token_timestamps")
+        timestamp_values = self._to_python_list(raw_timestamps)
+        if timestamp_values and isinstance(timestamp_values[0], list):
+            timestamp_values = timestamp_values[0]
+
+        if not timestamp_values:
+            timestamp_values = self._decode_token_offsets(outputs)
+
+        if not timestamp_values:
+            return None
+
+        token_ids = [int(token_id) for token_id in generated_ids.detach().cpu().tolist()]
+        usable_count = min(len(token_ids), len(token_texts), len(tokens), len(timestamp_values))
+        if usable_count <= 0:
+            return None
+
+        token_texts = self._recover_token_texts_from_sequence(generated_ids[:usable_count])
+        token_entries = []
+        prev_end = 0.0
+        for idx in range(usable_count):
+            token_text = token_texts[idx]
+            token_info = dict(tokens[idx])
+            timestamp_item = timestamp_values[idx]
+
+            if isinstance(timestamp_item, dict):
+                start = timestamp_item.get("start")
+                end = timestamp_item.get("end")
+            elif isinstance(timestamp_item, (list, tuple)) and len(timestamp_item) >= 2:
+                start, end = timestamp_item[0], timestamp_item[1]
+            else:
+                start = prev_end
+                end = timestamp_item
+
+            if start is None:
+                start = prev_end
+            if end is None:
+                end = start
+
+            start = float(start)
+            end = float(end)
+            if end < start:
+                end = start
+            if start < prev_end:
+                start = prev_end
+            if end < start:
+                end = start
+
+            token_info["token_id"] = token_ids[idx]
+            token_info["token"] = token_text
+            token_info["text"] = token_text
+            token_info["start"] = start
+            token_info["end"] = end
+            token_entries.append(token_info)
+            prev_end = end
+
+        token_entries = self._redistribute_leading_zero_timestamps(token_entries)
+        return token_entries or None
+
+    def _recover_token_texts_from_sequence(self, generated_ids: torch.Tensor) -> list[str]:
+        """
+        用前缀增量解码恢复每个 token 对应的文本片段。
+
+        参数:
+            generated_ids: 当前片段生成出的 token id 序列。
+
+        说明:
+            直接逐 token decode 在中日文场景下容易得到 `�`，因为单个 token
+            可能只是一个多字节字符的一部分。这里改为“逐步解码整个前缀，再取增量”，
+            以恢复更接近最终文本的 token 片段。
+        """
+        if self.processor is None:
+            return []
+
+        token_ids = [int(token_id) for token_id in generated_ids.detach().cpu().tolist()]
+        recovered_texts: list[str] = []
+        prev_text = ""
+        for end_idx in range(1, len(token_ids) + 1):
+            current_text = self.processor.tokenizer.decode(
+                token_ids[:end_idx],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            )
+            token_text = current_text[len(prev_text):]
+            recovered_texts.append(token_text)
+            prev_text = current_text
+        return recovered_texts
+
+    @staticmethod
+    def _redistribute_leading_zero_timestamps(token_entries: list[dict]) -> list[dict]:
+        """
+        将开头连续的零时长 token 均分到首个有效时间边界之前。
+
+        参数:
+            token_entries: token 时间戳条目列表。
+
+        说明:
+            Whisper 常把一句话前几个 token 的时间都压成 0。
+            若后面已经出现首个有效边界，则把这段前导 token 均匀铺到该边界之前，
+            以便后续做 chunk 内切分时能拿到更细的边界信息。
+        """
+        if not token_entries:
+            return token_entries
+
+        first_positive_idx = None
+        first_positive_end = 0.0
+        for idx, entry in enumerate(token_entries):
+            start = float(entry.get("start", 0.0))
+            end = float(entry.get("end", 0.0))
+            if end > 0.0 or start > 0.0:
+                first_positive_idx = idx
+                first_positive_end = max(start, end)
+                break
+
+        if first_positive_idx is None or first_positive_idx == 0 or first_positive_end <= 0.0:
+            return token_entries
+
+        leading_count = first_positive_idx + 1
+        step = first_positive_end / max(leading_count, 1)
+        current = 0.0
+        for idx in range(leading_count):
+            next_time = first_positive_end if idx == leading_count - 1 else current + step
+            token_entries[idx]["start"] = float(current)
+            token_entries[idx]["end"] = float(max(next_time, current))
+            current = next_time
+        return token_entries
+
+    def _decode_token_offsets(self, outputs) -> list | None:
+        """
+        使用 tokenizer offsets 作为 token 时间戳兜底。
+
+        参数:
+            outputs: `generate()` 返回值。
+        """
+        sequences = self._extract_generate_field(outputs, "sequences")
+        if sequences is None or self.processor is None:
+            return None
+        try:
+            decoded = self.processor.tokenizer.decode(
+                sequences[0],
+                skip_special_tokens=False,
+                output_offsets=True,
+                time_precision=0.02,
+            )
+        except Exception:
+            return None
+
+        if isinstance(decoded, dict):
+            for key in ("offsets", "token_offsets", "chunks"):
+                value = decoded.get(key)
+                if value:
+                    return value
+        return None
+
+    @staticmethod
+    def token_confidence_stats(tokens: list[dict] | None) -> tuple[float | None, float | None]:
         """
         统计 token 级置信度的最低值与低分占比。
 
         参数:
-            token_confidences: token 级置信度列表。
+            tokens: token 级详情列表。
         """
-        if not token_confidences:
+        if not tokens:
             return None, None
         values = [
             float(item["confidence"])
-            for item in token_confidences
+            for item in tokens
             if item.get("token", "").strip()
         ]
         if not values:
@@ -834,15 +1080,21 @@ class WhisperTranscriber:
         segment_data = self._coerce_segment(segment)
         scores = segment_data["scores"]
         audio_16k = self.prepare_audio(segment_data["audio"], input_sr=sr)
-        generate_kwargs = self._build_generate_kwargs(prompt_text)
+        effective_prompt_text = prompt_text
+        prompt_disabled_for_timestamps = False
+        if self.enable_token_timestamps and self.disable_prompt_for_token_timestamps and prompt_text:
+            effective_prompt_text = ""
+            prompt_disabled_for_timestamps = True
+
+        generate_kwargs = self._build_generate_kwargs(effective_prompt_text)
         candidates: list[WhisperChunkResult] = []
         for candidate_index in range(self.num_candidates):
-            text, avg_logprob, avg_confidence, token_confidences, raw_result = self.compute_generation_result(
+            text, avg_logprob, avg_confidence, tokens, raw_result = self.compute_generation_result(
                 audio_16k=audio_16k,
                 generate_kwargs=generate_kwargs,
             )
             text = text or ""
-            min_token_confidence, low_conf_token_ratio = self.token_confidence_stats(token_confidences)
+            min_token_confidence, low_conf_token_ratio = self.token_confidence_stats(tokens)
             compression_ratio = self._compression_ratio(text)
 
             confidence_source = "generate_scores"
@@ -869,6 +1121,9 @@ class WhisperTranscriber:
             context_text = self._trim_repeated_text_for_context(text)
             raw_result = dict(raw_result or {})
             raw_result["candidate_index"] = candidate_index
+            if prompt_disabled_for_timestamps:
+                raw_result["requested_prompt_text"] = prompt_text
+                raw_result["prompt_disabled_for_token_timestamps"] = True
 
             candidates.append(
                 WhisperChunkResult(
@@ -882,7 +1137,7 @@ class WhisperTranscriber:
                     avg_logprob=avg_logprob,
                     avg_confidence=avg_confidence,
                     confidence_source=confidence_source,
-                    token_confidences=token_confidences,
+                    tokens=tokens,
                     min_token_confidence=min_token_confidence,
                     low_conf_token_ratio=low_conf_token_ratio,
                     compression_ratio=compression_ratio,
@@ -890,7 +1145,7 @@ class WhisperTranscriber:
                     context_text=context_text,
                     hallucination_risk=hallucination_risk,
                     risk_components=risk_components,
-                    prompt_text=prompt_text,
+                    prompt_text=effective_prompt_text,
                     scores=dict(scores),
                     raw_result=raw_result,
                 )
