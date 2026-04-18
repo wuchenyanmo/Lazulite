@@ -341,7 +341,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--album", help="覆盖音频专辑元数据")
     parser.add_argument("--lyric-path", help="本地歌词文件路径；提供后优先使用本地歌词而不是网络搜索")
     parser.add_argument("--language", help="Whisper 语言参数，例如 zh / ja / en")
-    parser.add_argument("--model-id", default="model/whisper-large-v3", help="Whisper 模型目录或模型名")
+    parser.add_argument("--model-id", default="openai/whisper-large-v3", help="Whisper 模型目录或模型名")
     parser.add_argument(
         "--align-mode",
         default="auto",

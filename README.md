@@ -48,5 +48,5 @@ python -m Lazulite example.m4a
 使用 `python -m Lazulite --help` 查看更多参数和用法，也可作为 Python 库导入并调用
 
 ## 性能
-
+默认模型是 Whisper-large-v3 ，参数量约1.5B，首次运行时会自动从 Hugging Face 下载模型
 在RTX 4090上测试，`offset-only`模式单首歌曲耗时30秒，峰值占用显存约5G，若回退到`dp`模式则增加至1分钟，峰值占用显存约8G

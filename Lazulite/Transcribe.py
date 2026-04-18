@@ -227,7 +227,7 @@ class WhisperTranscriber:
 
     def __init__(
         self,
-        model_id: str = "model/whisper-large-v3",
+        model_id: str = "openai/whisper-large-v3",
         language: str | None = None,
         task: str = "transcribe",
         device: str | None = None,
