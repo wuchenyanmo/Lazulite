@@ -13,9 +13,8 @@
   - `auto`：默认值，先使用`offset-only`尝试估计偏移，anchor片段数过少或偏移不一致时回退至`dp`模式
 
 ## 安装
-1. 参考PyTorch 安装说明：https://pytorch.org/get-started/locally/，
+1. 参考PyTorch 安装说明：https://pytorch.org/get-started/locally/ ，
 按自己CUDA版本和平台手动安装`torch`、`torchaudio`、`torchvision` 以及 `torchcodec`。
-
 示例（CUDA 12.8）：
 ```bash
 pip install torch torchaudio torchvision torchcodec --index-url https://download.pytorch.org/whl/cu128
@@ -27,7 +26,6 @@ pip install -r requirements.txt
 ```
 
 3. 安装 FlashAttention-2 加速推理（可选）：
-
 参考FlashAttention仓库：https://github.com/Dao-AILab/flash-attention
 
 ## 用法
