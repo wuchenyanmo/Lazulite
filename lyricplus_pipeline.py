@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from LyricPlus.Pipeline import main
+from Lazulite.Pipeline import main
 
 
 if __name__ == "__main__":
