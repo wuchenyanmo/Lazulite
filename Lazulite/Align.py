@@ -2,8 +2,8 @@ from difflib import SequenceMatcher
 
 import numpy as np
 
-from LyricPlus.Lyric import LyricLineStamp, LyricTokenLine
-from LyricPlus.Transcribe import WhisperChunkResult, WhisperTrackResult
+from Lazulite.Lyric import LyricLineStamp, LyricTokenLine
+from Lazulite.Transcribe import WhisperChunkResult, WhisperTrackResult
 
 
 class AlignedLyricLine:

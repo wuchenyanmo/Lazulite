@@ -1,8 +1,8 @@
 import numpy as np
 import requests
 import json
-from LyricPlus.Search.SearchMusic import search_163_music_file
-from LyricPlus.Lyric import LyricLineStamp
+from Lazulite.Search.SearchMusic import search_163_music_file
+from Lazulite.Lyric import LyricLineStamp
 
 HEADER = {'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"}
 # 双语歌词API

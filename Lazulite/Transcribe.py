@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 import torch
 
-from LyricPlus.Vocal import VocalAnalysisResult, VocalSegment
+from Lazulite.Vocal import VocalAnalysisResult, VocalSegment
 
 
 def _clamp01(value: float) -> float:

@@ -6,9 +6,9 @@ import re
 
 import numpy as np
 
-from LyricPlus.Align import AlignedLyricLine, LyricAlignmentResult, LyricAligner
-from LyricPlus.Lyric import LyricLineStamp, LyricTokenLine
-from LyricPlus.Transcribe import WhisperChunkResult, WhisperTrackResult
+from Lazulite.Align import AlignedLyricLine, LyricAlignmentResult, LyricAligner
+from Lazulite.Lyric import LyricLineStamp, LyricTokenLine
+from Lazulite.Transcribe import WhisperChunkResult, WhisperTrackResult
 
 
 @dataclass

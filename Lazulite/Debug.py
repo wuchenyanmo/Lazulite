@@ -7,9 +7,9 @@ import numpy as np
 import torch
 import torchaudio
 
-from LyricPlus.Align import LyricAlignmentResult
-from LyricPlus.Lyric import LyricLineStamp
-from LyricPlus.Transcribe import WhisperTrackResult
+from Lazulite.Align import LyricAlignmentResult
+from Lazulite.Lyric import LyricLineStamp
+from Lazulite.Transcribe import WhisperTrackResult
 
 
 def format_time(seconds: float) -> str:

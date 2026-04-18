@@ -12,16 +12,16 @@ from mutagen.mp4 import MP4
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 
-from LyricPlus import LyricAligner, OffsetAligner, VocalAnalyzer, WhisperTranscriber
-from LyricPlus.Debug import (
+from Lazulite import LyricAligner, OffsetAligner, VocalAnalyzer, WhisperTranscriber
+from Lazulite.Debug import (
     load_alignment_lyric,
     save_alignment_json,
     save_offset_debug_json,
     save_transcription_json,
 )
-from LyricPlus.Lyric import LyricLineStamp, LyricTokenLine
-from LyricPlus.Search.GetLyric import get_163_lyric
-from LyricPlus.Search.SearchMusic import search_163_music
+from Lazulite.Lyric import LyricLineStamp, LyricTokenLine
+from Lazulite.Search.GetLyric import get_163_lyric
+from Lazulite.Search.SearchMusic import search_163_music
 
 
 @dataclass
