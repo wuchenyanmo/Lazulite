@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import io
+import traceback
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -451,6 +455,24 @@ def write_lyric_metadata(audio_path: str | Path, lyric_text: str) -> None:
     audio.save()
 
 
+SUPPORTED_AUDIO_SUFFIXES = {
+    ".m4a", ".mp4", ".aac", ".alac", ".mp3", ".flac", ".ogg", ".oga",
+    ".wav", ".wave", ".opus", ".m4b",
+}
+
+
+def _iter_audio_files_in_directory(directory: Path) -> list[Path]:
+    files = [
+        path for path in sorted(directory.iterdir())
+        if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES
+    ]
+    return files
+
+
+def _batch_log_paths(directory: Path) -> tuple[Path, Path]:
+    return directory / "lazulite_batch.log", directory / "lazulite_batch.err"
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="读取音频元数据，搜索歌词，执行分片转写与约束对齐，并将对齐歌词写回音频标签。"
@@ -503,9 +525,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return build_arg_parser().parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    audio_path = Path(args.audio_path).expanduser().resolve()
+def process_audio_file(args: argparse.Namespace, audio_path: str | Path) -> None:
+    audio_path = Path(audio_path).expanduser().resolve()
     if not audio_path.exists():
         raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
@@ -739,3 +760,78 @@ def main(argv: list[str] | None = None) -> None:
             offset_transcriber.unload_model_if_needed()
         if dp_transcriber is not None:
             dp_transcriber.unload_model_if_needed()
+
+
+def _run_batch_directory(args: argparse.Namespace, input_dir: Path) -> None:
+    audio_files = _iter_audio_files_in_directory(input_dir)
+    log_path, err_path = _batch_log_paths(input_dir)
+    log_entries: list[str] = []
+    err_entries: list[str] = []
+    failure_count = 0
+
+    if not audio_files:
+        message = f"目录下未找到可处理的音频文件: {input_dir}"
+        log_path.write_text("", encoding="utf-8")
+        err_path.write_text(f"{message}\n", encoding="utf-8")
+        raise FileNotFoundError(message)
+
+    for audio_file in audio_files:
+        per_file_args = copy.copy(args)
+        per_file_args.audio_path = str(audio_file)
+        output = io.StringIO()
+        error_output = io.StringIO()
+        try:
+            with redirect_stdout(output), redirect_stderr(error_output):
+                process_audio_file(per_file_args, audio_file)
+        except Exception:
+            failure_count += 1
+            captured = output.getvalue().strip()
+            captured_err = error_output.getvalue().strip()
+            traceback_text = traceback.format_exc().strip()
+            if captured:
+                log_entries.append(f"=== {audio_file.name} ===\n{captured}")
+            error_parts = [f"=== {audio_file.name} ==="]
+            if captured_err:
+                error_parts.append(captured_err)
+            if captured:
+                error_parts.append(captured)
+            error_parts.append(traceback_text)
+            err_entries.append("\n".join(part for part in error_parts if part))
+            continue
+
+        captured = output.getvalue().strip()
+        captured_err = error_output.getvalue().strip()
+        if captured:
+            log_entries.append(f"=== {audio_file.name} ===\n{captured}")
+        if captured_err:
+            err_entries.append(f"=== {audio_file.name} ===\n{captured_err}")
+
+    log_path.write_text("\n\n".join(log_entries) + ("\n" if log_entries else ""), encoding="utf-8")
+    err_path.write_text("\n\n".join(err_entries) + ("\n" if err_entries else ""), encoding="utf-8")
+
+    print("批处理完成:")
+    print(f"  input_dir={input_dir}")
+    print(f"  files={len(audio_files)}")
+    print(f"  log={log_path}")
+    print(f"  err={err_path}")
+    print(f"  failed={failure_count}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    input_path = Path(args.audio_path).expanduser().resolve()
+    if not input_path.exists():
+        raise FileNotFoundError(f"输入路径不存在: {input_path}")
+
+    if input_path.is_dir():
+        if args.output_lrc or args.transcription_json or args.alignment_json or args.offset_debug_json:
+            raise RuntimeError(
+                "目录批处理模式下不支持 --output-lrc / --transcription-json / --alignment-json / --offset-debug-json；"
+                "请使用默认按文件输出"
+            )
+        if args.lyric_path:
+            raise RuntimeError("目录批处理模式下不支持统一的 --lyric-path；请改用在线歌词或内嵌歌词")
+        _run_batch_directory(args, input_path)
+        return
+
+    process_audio_file(args, input_path)
