@@ -1,29 +1,22 @@
-from Lazulite.Search.Kugou import (
-    download_kugou_lyric,
-    get_kugou_lyric,
-    get_kugou_lyric_from_candidate,
-    search_kugou_lyric_candidates,
-    search_kugou_music,
-    search_kugou_music_file,
-)
-from Lazulite.Search.Netease import (
-    get_163_lyric,
-    match_163_search_result,
-    parse_163_artist_dict,
-    search_163_music,
-    search_163_music_file,
-)
+from Lazulite.Search.Kugou import KugouProvider, search_kugou_music
+from Lazulite.Search.Netease import NeteaseProvider, get_163_lyric, search_163_music
+from Lazulite.Search.Provider import OnlineLyricProvider, SearchCandidate
+
+
+def build_default_provider_registry() -> list[OnlineLyricProvider]:
+    return [
+        NeteaseProvider(),
+        KugouProvider(),
+    ]
+
 
 __all__ = [
-    "download_kugou_lyric",
+    "KugouProvider",
+    "NeteaseProvider",
+    "OnlineLyricProvider",
+    "SearchCandidate",
+    "build_default_provider_registry",
     "get_163_lyric",
-    "get_kugou_lyric",
-    "get_kugou_lyric_from_candidate",
-    "match_163_search_result",
-    "parse_163_artist_dict",
     "search_163_music",
-    "search_163_music_file",
-    "search_kugou_lyric_candidates",
     "search_kugou_music",
-    "search_kugou_music_file",
 ]

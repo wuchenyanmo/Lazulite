@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from itertools import chain
-import os
 from urllib.parse import quote
+import warnings
 
-from fuzzywuzzy import fuzz
-from mutagen.mp4 import MP4
 import numpy as np
 import requests
 from requests.exceptions import RequestException
-import warnings
 
 from Lazulite.Lyric import LyricLineStamp
+from Lazulite.Search.Common import combined_fuzzy_score
+from Lazulite.Search.Provider import OnlineLyricProvider, SearchCandidate
 
 HEADER = {
     "User-Agent": (
@@ -21,26 +20,45 @@ HEADER = {
     )
 }
 SEARCH_LIMIT = 20
-SEARCH_163_API_THIRD = "https://apis.netstart.cn/music/cloudsearch?keywords={name}"
+# 之前这里用过第三方 `apis.netstart.cn`，注释里也明确写过它“信息更全”。
+# 这次重新核对接口后，官方搜索接口已经能稳定返回当前打分所需的字段：
+# `id` / `dt` / `ar` / `al` / `alia` / `tns`。
+# 因此这里优先切回官方接口，减少对第三方服务的依赖面。
+SEARCH_163_API = "https://music.163.com/api/search/get?s={name}&type=1&offset=0&limit={limit}"
 LYRIC_163_API = "https://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&tv=-1"
-
-
-def _set_match_score(result: dict, score: float) -> dict:
-    result["match sore"] = score
-    result["match_score"] = score
-    result["source"] = "netease"
-    return result
 
 
 def parse_163_artist_dict(artist_dict: dict) -> list[str]:
     """
     解析网易云歌手对象，返回去重后的候选名字列表。
     """
-    artist_list = [artist_dict["name"]]
+    artist_list = [str(artist_dict.get("name") or "").strip()]
     for key in ("tns", "alia", "alias"):
         values = artist_dict.get(key) or []
-        artist_list.extend(values)
-    return list(set(artist_list))
+        artist_list.extend(str(item).strip() for item in values if str(item).strip())
+    return [item for item in set(artist_list) if item]
+
+
+def _song_artists(result: dict) -> list[dict]:
+    artists = result.get("ar")
+    if artists:
+        return artists
+    return result.get("artists") or []
+
+
+def _song_album(result: dict) -> dict:
+    album = result.get("al")
+    if album:
+        return album
+    return result.get("album") or {}
+
+
+def _song_aliases(result: dict) -> list[str]:
+    aliases: list[str] = []
+    for key in ("alia", "transNames", "tns"):
+        values = result.get(key) or []
+        aliases.extend(str(item).strip() for item in values if str(item).strip())
+    return aliases
 
 
 def match_163_search_result(
@@ -58,35 +76,113 @@ def match_163_search_result(
     """
     根据歌曲名、歌手和专辑对网易搜索结果打分。
     """
-
-    def fuzz_match(str1: str, str2: str) -> float:
-        return fuzz.partial_ratio(str1, str2) * (1 - full_match_weight) + fuzz.ratio(str1, str2) * full_match_weight
-
-    if np.abs(result["dt"] / 1000 - duration) > duration_threshold:
+    song_duration = float(result.get("dt", result.get("duration", 0.0))) / 1000.0
+    if np.abs(song_duration - duration) > duration_threshold:
         return 0.0
 
-    result_names = [result["name"], *(result.get("alia") or [])]
-    score = {"name": np.max([fuzz_match(name, res_name) for res_name in result_names])}
+    result_names = [str(result.get("name") or "").strip(), *_song_aliases(result)]
+    result_names = [item for item in result_names if item]
+    score = {
+        "name": max(combined_fuzzy_score(name, item, full_match_weight=full_match_weight) for item in result_names)
+        if result_names else 0.0,
+    }
 
     if artist is None:
         artist_weight = 0.0
         score["artist"] = 0.0
     else:
-        result_artists = [parse_163_artist_dict(d) for d in result.get("ar", [])]
+        result_artists = [parse_163_artist_dict(item) for item in _song_artists(result)]
         result_artists = list(chain(*result_artists))
-        score["artist"] = np.max([fuzz_match(artist, res_artist) for res_artist in result_artists]) if result_artists else 0.0
+        score["artist"] = (
+            max(combined_fuzzy_score(artist, item, full_match_weight=full_match_weight) for item in result_artists)
+            if result_artists else 0.0
+        )
 
-    if album is None or "al" not in result:
+    album_info = _song_album(result)
+    if album is None or not album_info:
         album_weight = 0.0
         score["album"] = 0.0
     else:
-        result_albums = [result["al"]["name"], *(result["al"].get("tns") or [])]
-        score["album"] = np.max([fuzz_match(album, res_album) for res_album in result_albums]) if result_albums else 0.0
+        result_albums = [str(album_info.get("name") or "").strip(), *(album_info.get("tns") or [])]
+        result_albums = [str(item).strip() for item in result_albums if str(item).strip()]
+        score["album"] = (
+            max(combined_fuzzy_score(album, item, full_match_weight=full_match_weight) for item in result_albums)
+            if result_albums else 0.0
+        )
 
     total_weight = name_weight + artist_weight + album_weight
     if total_weight <= 0:
         return 0.0
-    return (name_weight * score["name"] + artist_weight * score["artist"] + album_weight * score["album"]) / total_weight
+    value = (name_weight * score["name"] + artist_weight * score["artist"] + album_weight * score["album"]) / total_weight
+    return float(value)
+
+
+class NeteaseProvider(OnlineLyricProvider):
+    source_name = "netease"
+
+    def search(
+        self,
+        title: str,
+        duration: float,
+        artist: str | None = None,
+        album: str | None = None,
+    ) -> list[SearchCandidate]:
+        url = SEARCH_163_API.format(name=quote(title), limit=SEARCH_LIMIT)
+        try:
+            response = requests.get(url, headers=HEADER, timeout=(5, 7))
+            response.raise_for_status()
+            payload = response.json()
+        except RequestException as exc:
+            warnings.warn(f"网易云搜索请求失败，已跳过该来源: {exc}", RuntimeWarning)
+            return []
+
+        songs = payload.get("result", {}).get("songs", [])
+        candidates: list[SearchCandidate] = []
+        for item in songs:
+            artist_names = list(chain(*[parse_163_artist_dict(artist_item) for artist_item in _song_artists(item)]))
+            album_info = _song_album(item)
+            candidates.append(
+                SearchCandidate(
+                    source=self.source_name,
+                    candidate_id=str(item.get("id")),
+                    title=str(item.get("name") or "").strip(),
+                    artist=" / ".join(artist_names) if artist_names else None,
+                    album=str(album_info.get("name") or "").strip() or None,
+                    duration=float(item.get("dt", item.get("duration", 0.0))) / 1000.0,
+                    match_score=match_163_search_result(title, duration, item, artist, album),
+                    raw=item,
+                )
+            )
+        candidates.sort(key=lambda item: item.match_score, reverse=True)
+        return candidates
+
+    def fetch_lyric(self, candidate: SearchCandidate) -> LyricLineStamp | None:
+        return self.fetch_lyric_by_song_id(candidate.candidate_id)
+
+    def fetch_lyric_by_song_id(self, song_id: str | int) -> LyricLineStamp | None:
+        url = LYRIC_163_API.format(song_id=song_id)
+        try:
+            response = requests.get(url, headers=HEADER, timeout=(5, 7))
+            response.raise_for_status()
+            payload = response.json()
+        except RequestException as exc:
+            warnings.warn(f"网易云歌词请求失败，已跳过该候选: {exc}", RuntimeWarning)
+            return None
+
+        if "lrc" not in payload:
+            return None
+        if payload.get("nolyric") or payload.get("pureMusic"):
+            return None
+
+        lyric_text = (payload.get("lrc") or {}).get("lyric")
+        if not lyric_text:
+            return None
+
+        lyric = LyricLineStamp(lyric_text)
+        translation_text = (payload.get("tlyric") or {}).get("lyric")
+        if translation_text:
+            lyric.load_translation(translation_text)
+        return lyric
 
 
 def search_163_music(
@@ -94,52 +190,9 @@ def search_163_music(
     duration: float,
     artist: str | None = None,
     album: str | None = None,
-) -> list[dict]:
-    url = SEARCH_163_API_THIRD.format(name=quote(name))
-    try:
-        response = requests.get(url, headers=HEADER, timeout=(5, 7))
-        response.raise_for_status()
-        res = response.json()
-    except RequestException as exc:
-        warnings.warn(f"网易云搜索请求失败，已跳过该来源: {exc}", RuntimeWarning)
-        return []
-
-    res_list = res.get("result", {}).get("songs", [])
-    for item in res_list:
-        score = match_163_search_result(name, duration, item, artist, album)
-        _set_match_score(item, score)
-    res_list.sort(key=lambda item: float(item.get("match sore", 0.0)), reverse=True)
-    return res_list
-
-
-def search_163_music_file(file: os.PathLike) -> list[dict]:
-    audio = MP4(file)
-    name = audio.tags["©nam"][0]
-    artist = audio.tags["©ART"][0]
-    album = audio.tags["©alb"][0]
-    duration = audio.info.length
-    return search_163_music(name, duration, artist, album)
+) -> list[SearchCandidate]:
+    return NeteaseProvider().search(name, duration, artist, album)
 
 
 def get_163_lyric(song_id: str | int) -> LyricLineStamp | None:
-    url = LYRIC_163_API.format(song_id=song_id)
-    try:
-        response = requests.get(url, headers=HEADER, timeout=(5, 7))
-        response.raise_for_status()
-        res = response.json()
-    except RequestException as exc:
-        warnings.warn(f"网易云歌词请求失败，已跳过该候选: {exc}", RuntimeWarning)
-        return None
-    if "lrc" not in res:
-        return None
-    if res.get("nolyric") or res.get("pureMusic"):
-        return None
-    lyric_text = (res.get("lrc") or {}).get("lyric")
-    if not lyric_text:
-        return None
-
-    lyric = LyricLineStamp(lyric_text)
-    translation_text = (res.get("tlyric") or {}).get("lyric")
-    if translation_text:
-        lyric.load_translation(translation_text)
-    return lyric
+    return NeteaseProvider().fetch_lyric_by_song_id(song_id)

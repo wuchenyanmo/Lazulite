@@ -1,3 +1,3 @@
-from Lazulite.Search.Netease import get_163_lyric
+from Lazulite.Search.Netease import NeteaseProvider, get_163_lyric
 
-__all__ = ["get_163_lyric"]
+__all__ = ["NeteaseProvider", "get_163_lyric"]

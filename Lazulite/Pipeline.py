@@ -21,7 +21,7 @@ from Lazulite.Debug import (
     save_transcription_json,
 )
 from Lazulite.Lyric import LyricLineStamp, LyricTokenLine
-from Lazulite.Search import get_163_lyric, get_kugou_lyric_from_candidate, search_163_music, search_kugou_music
+from Lazulite.Search import NeteaseProvider, build_default_provider_registry
 
 
 @dataclass
@@ -94,69 +94,57 @@ def search_lyric_from_metadata(
     min_search_score: float = 55.0,
 ) -> tuple[LyricLineStamp, dict[str, Any]]:
     if song_id is not None:
-        lyric = get_163_lyric(song_id)
+        provider = NeteaseProvider()
+        lyric = provider.fetch_lyric_by_song_id(song_id)
         if lyric is None:
             raise RuntimeError(f"未能获取 song_id={song_id} 对应歌词")
-        return lyric, {"source": "netease", "id": song_id, "match sore": None, "match_score": None}
+        return lyric, {
+            "source": provider.source_name,
+            "candidate_id": str(song_id),
+            "title": metadata.title,
+            "artist": metadata.artist,
+            "album": metadata.album,
+            "match_score": None,
+        }
 
     if not metadata.title:
         raise ValueError("音频元数据中缺少标题，无法自动搜索歌词；请传入 --title 或 --song-id")
 
-    source_specs = [
-        (
-            "netease",
-            lambda: search_163_music(
-                name=metadata.title,
-                duration=metadata.duration,
-                artist=metadata.artist,
-                album=metadata.album,
-            ),
-            lambda candidate: get_163_lyric(candidate.get("id")),
-        ),
-        (
-            "kugou",
-            lambda: search_kugou_music(
-                name=metadata.title,
-                duration=metadata.duration,
-                artist=metadata.artist,
-                album=metadata.album,
-            ),
-            get_kugou_lyric_from_candidate,
-        ),
-    ]
-
     best_score_by_source: dict[str, float] = {}
     attempted_by_source: dict[str, list[str]] = {}
+    providers = build_default_provider_registry()
 
-    for source_name, search_candidates, fetch_lyric in source_specs:
-        candidates = search_candidates()
+    for provider in providers:
+        candidates = provider.search(
+            title=metadata.title,
+            duration=metadata.duration,
+            artist=metadata.artist,
+            album=metadata.album,
+        )
         if not candidates:
-            attempted_by_source[source_name] = []
+            attempted_by_source[provider.source_name] = []
             continue
 
-        best_score_by_source[source_name] = float(candidates[0].get("match sore", 0.0))
+        best_score_by_source[provider.source_name] = float(candidates[0].match_score)
         qualified_candidates = [
             candidate
             for candidate in candidates
-            if float(candidate.get("match sore", 0.0)) >= min_search_score
+            if float(candidate.match_score) >= min_search_score
         ]
         attempted: list[str] = []
         for candidate in qualified_candidates:
-            candidate_id = candidate.get("id") or candidate.get("hash") or candidate.get("filename")
-            score = float(candidate.get("match sore", 0.0))
-            attempted.append(f"{candidate_id}({score:.1f})")
+            attempted.append(f"{candidate.candidate_id}({candidate.match_score:.1f})")
             try:
-                lyric = fetch_lyric(candidate)
+                lyric = provider.fetch_lyric(candidate)
             except Exception as exc:
                 warnings.warn(
-                    f"在线歌词候选获取失败，已跳过 source={source_name} candidate={candidate_id}: {exc}",
+                    f"在线歌词候选获取失败，已跳过 source={provider.source_name} candidate={candidate.candidate_id}: {exc}",
                     RuntimeWarning,
                 )
                 lyric = None
             if lyric is not None:
-                candidate["source"] = source_name
-                return lyric, candidate
-        attempted_by_source[source_name] = attempted
+                return lyric, candidate.to_dict()
+        attempted_by_source[provider.source_name] = attempted
 
     if best_score_by_source:
         summary = ", ".join(
@@ -447,7 +435,14 @@ def main(argv: list[str] | None = None) -> None:
         lyric = load_alignment_lyric(args.lyric_path, music_path=str(audio_path))
         if lyric is None:
             raise RuntimeError(f"无法从本地歌词文件加载歌词: {args.lyric_path}")
-        search_result = {"source": "local", "id": None, "match sore": None}
+        search_result = {
+            "source": "local",
+            "candidate_id": None,
+            "title": metadata.title,
+            "artist": metadata.artist,
+            "album": metadata.album,
+            "match_score": None,
+        }
     else:
         lyric, search_result = search_lyric_from_metadata(
             metadata=metadata,
@@ -457,8 +452,8 @@ def main(argv: list[str] | None = None) -> None:
 
     print("歌词来源:")
     print(f"  source={search_result.get('source', 'netease')}")
-    print(f"  song_id={search_result.get('id')}")
-    print(f"  match_score={search_result.get('match sore')}")
+    print(f"  candidate_id={search_result.get('candidate_id')}")
+    print(f"  match_score={search_result.get('match_score')}")
     print(f"  lyric_lines={len(lyric.lyric_lines)}")
 
     analyzer = VocalAnalyzer(low_memory_mode=args.low_memory_mode)
