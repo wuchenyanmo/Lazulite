@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import warnings
 
 from mutagen import File as MutagenFile
 from mutagen.flac import FLAC
@@ -20,8 +21,7 @@ from Lazulite.Debug import (
     save_transcription_json,
 )
 from Lazulite.Lyric import LyricLineStamp, LyricTokenLine
-from Lazulite.Search.GetLyric import get_163_lyric
-from Lazulite.Search.SearchMusic import search_163_music
+from Lazulite.Search import get_163_lyric, get_kugou_lyric_from_candidate, search_163_music, search_kugou_music
 
 
 @dataclass
@@ -97,45 +97,90 @@ def search_lyric_from_metadata(
         lyric = get_163_lyric(song_id)
         if lyric is None:
             raise RuntimeError(f"未能获取 song_id={song_id} 对应歌词")
-        return lyric, {"id": song_id, "match sore": None}
+        return lyric, {"source": "netease", "id": song_id, "match sore": None, "match_score": None}
 
     if not metadata.title:
         raise ValueError("音频元数据中缺少标题，无法自动搜索歌词；请传入 --title 或 --song-id")
 
-    candidates = search_163_music(
-        name=metadata.title,
-        duration=metadata.duration,
-        artist=metadata.artist,
-        album=metadata.album,
-    )
-    if not candidates:
-        raise RuntimeError("歌词搜索没有返回任何候选结果")
-
-    qualified_candidates = [
-        candidate
-        for candidate in candidates
-        if float(candidate.get("match sore", 0.0)) >= min_search_score
+    source_specs = [
+        (
+            "netease",
+            lambda: search_163_music(
+                name=metadata.title,
+                duration=metadata.duration,
+                artist=metadata.artist,
+                album=metadata.album,
+            ),
+            lambda candidate: get_163_lyric(candidate.get("id")),
+        ),
+        (
+            "kugou",
+            lambda: search_kugou_music(
+                name=metadata.title,
+                duration=metadata.duration,
+                artist=metadata.artist,
+                album=metadata.album,
+            ),
+            get_kugou_lyric_from_candidate,
+        ),
     ]
-    if not qualified_candidates:
-        best_score = float(candidates[0].get("match sore", 0.0))
-        raise RuntimeError(
-            f"搜索命中分数过低: {best_score:.1f} < {min_search_score:.1f}，"
-            "请改用 --song-id 或手动提供 --lyric-path"
+
+    best_score_by_source: dict[str, float] = {}
+    attempted_by_source: dict[str, list[str]] = {}
+
+    for source_name, search_candidates, fetch_lyric in source_specs:
+        candidates = search_candidates()
+        if not candidates:
+            attempted_by_source[source_name] = []
+            continue
+
+        best_score_by_source[source_name] = float(candidates[0].get("match sore", 0.0))
+        qualified_candidates = [
+            candidate
+            for candidate in candidates
+            if float(candidate.get("match sore", 0.0)) >= min_search_score
+        ]
+        attempted: list[str] = []
+        for candidate in qualified_candidates:
+            candidate_id = candidate.get("id") or candidate.get("hash") or candidate.get("filename")
+            score = float(candidate.get("match sore", 0.0))
+            attempted.append(f"{candidate_id}({score:.1f})")
+            try:
+                lyric = fetch_lyric(candidate)
+            except Exception as exc:
+                warnings.warn(
+                    f"在线歌词候选获取失败，已跳过 source={source_name} candidate={candidate_id}: {exc}",
+                    RuntimeWarning,
+                )
+                lyric = None
+            if lyric is not None:
+                candidate["source"] = source_name
+                return lyric, candidate
+        attempted_by_source[source_name] = attempted
+
+    if best_score_by_source:
+        summary = ", ".join(
+            f"{source}={score:.1f}"
+            for source, score in best_score_by_source.items()
         )
+        if all(score < min_search_score for score in best_score_by_source.values()):
+            raise RuntimeError(
+                "各平台搜索命中分数都低于阈值: "
+                f"{summary} < {min_search_score:.1f}；"
+                "请改用 --song-id 或手动提供 --lyric-path"
+            )
 
-    attempted: list[str] = []
-    for candidate in qualified_candidates:
-        song_id_value = candidate.get("id")
-        score = float(candidate.get("match sore", 0.0))
-        attempted.append(f"{song_id_value}({score:.1f})")
-        lyric = get_163_lyric(song_id_value)
-        if lyric is not None:
-            return lyric, candidate
-
-    raise RuntimeError(
-        "已尝试所有分数达标的搜索候选，但都未能获取歌词；"
-        f"尝试过的候选: {', '.join(attempted)}"
-    )
+    attempted_fragments = [
+        f"{source}: {', '.join(values)}"
+        for source, values in attempted_by_source.items()
+        if values
+    ]
+    if attempted_fragments:
+        raise RuntimeError(
+            "已尝试所有分数达标的在线歌词候选，但都未能获取歌词；"
+            f"尝试过的候选: {'; '.join(attempted_fragments)}"
+        )
+    raise RuntimeError("歌词搜索没有返回任何可用候选结果")
 
 
 def _format_lrc_timestamp(seconds: float) -> str:
