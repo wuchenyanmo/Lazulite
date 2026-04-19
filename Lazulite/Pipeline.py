@@ -111,6 +111,7 @@ def search_lyric_from_metadata(
         raise ValueError("音频元数据中缺少标题，无法自动搜索歌词；请传入 --title 或 --netease-song-id")
 
     best_score_by_source: dict[str, float] = {}
+    top_candidate_by_source: dict[str, dict[str, Any]] = {}
     attempted_by_source: dict[str, list[str]] = {}
     providers = build_default_provider_registry()
 
@@ -126,6 +127,7 @@ def search_lyric_from_metadata(
             continue
 
         best_score_by_source[provider.source_name] = float(candidates[0].match_score)
+        top_candidate_by_source[provider.source_name] = candidates[0].to_dict()
         qualified_candidates = [
             candidate
             for candidate in candidates
@@ -151,12 +153,27 @@ def search_lyric_from_metadata(
             f"{source}={score:.1f}"
             for source, score in best_score_by_source.items()
         )
+        candidate_summary = "; ".join(
+            (
+                f"{source}: "
+                f"id={candidate['candidate_id']}, "
+                f"title={candidate['title']}, "
+                f"artist={candidate['artist']}, "
+                f"album={candidate['album']}, "
+                f"duration={candidate['duration']}, "
+                f"match_score={float(candidate['match_score']):.1f}"
+            )
+            for source, candidate in top_candidate_by_source.items()
+        )
         if all(score < min_search_score for score in best_score_by_source.values()):
             raise RuntimeError(
                 "各平台搜索命中分数都低于阈值: "
                 f"{summary} < {min_search_score:.1f}；"
+                f"最高分候选: {candidate_summary}；"
                 "请改用 --netease-song-id 或手动提供 --lyric-path"
             )
+    else:
+        candidate_summary = ""
 
     attempted_fragments = [
         f"{source}: {', '.join(values)}"
@@ -167,6 +184,7 @@ def search_lyric_from_metadata(
         raise RuntimeError(
             "已尝试所有分数达标的在线歌词候选，但都未能获取歌词；"
             f"尝试过的候选: {'; '.join(attempted_fragments)}"
+            + (f"；各平台最高分候选: {candidate_summary}" if candidate_summary else "")
         )
     raise RuntimeError("歌词搜索没有返回任何可用候选结果")
 
