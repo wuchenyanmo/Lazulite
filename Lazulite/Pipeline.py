@@ -90,17 +90,17 @@ def read_audio_metadata(audio_path: str | Path) -> AudioMetadata:
 
 def search_lyric_from_metadata(
     metadata: AudioMetadata,
-    song_id: str | int | None = None,
+    netease_song_id: str | int | None = None,
     min_search_score: float = 55.0,
 ) -> tuple[LyricLineStamp, dict[str, Any]]:
-    if song_id is not None:
+    if netease_song_id is not None:
         provider = NeteaseProvider()
-        lyric = provider.fetch_lyric_by_song_id(song_id)
+        lyric = provider.fetch_lyric_by_song_id(netease_song_id)
         if lyric is None:
-            raise RuntimeError(f"未能获取 song_id={song_id} 对应歌词")
+            raise RuntimeError(f"未能获取 netease_song_id={netease_song_id} 对应歌词")
         return lyric, {
             "source": provider.source_name,
-            "candidate_id": str(song_id),
+            "candidate_id": str(netease_song_id),
             "title": metadata.title,
             "artist": metadata.artist,
             "album": metadata.album,
@@ -108,7 +108,7 @@ def search_lyric_from_metadata(
         }
 
     if not metadata.title:
-        raise ValueError("音频元数据中缺少标题，无法自动搜索歌词；请传入 --title 或 --song-id")
+        raise ValueError("音频元数据中缺少标题，无法自动搜索歌词；请传入 --title 或 --netease-song-id")
 
     best_score_by_source: dict[str, float] = {}
     attempted_by_source: dict[str, list[str]] = {}
@@ -155,7 +155,7 @@ def search_lyric_from_metadata(
             raise RuntimeError(
                 "各平台搜索命中分数都低于阈值: "
                 f"{summary} < {min_search_score:.1f}；"
-                "请改用 --song-id 或手动提供 --lyric-path"
+                "请改用 --netease-song-id 或手动提供 --lyric-path"
             )
 
     attempted_fragments = [
@@ -368,11 +368,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="读取音频元数据，搜索歌词，执行分片转写与约束对齐，并将对齐歌词写回音频标签。"
     )
     parser.add_argument("audio_path", help="输入音频文件路径")
-    parser.add_argument("--song-id", help="直接指定网易云歌曲 ID，跳过搜索")
+    parser.add_argument("--netease-song-id", help="直接指定网易云歌曲 ID，跳过在线搜索")
     parser.add_argument("--title", help="覆盖音频标题元数据")
     parser.add_argument("--artist", help="覆盖音频歌手元数据")
     parser.add_argument("--album", help="覆盖音频专辑元数据")
     parser.add_argument("--lyric-path", help="本地歌词文件路径；提供后优先使用本地歌词而不是网络搜索")
+    parser.add_argument(
+        "--read-metadata-lyric",
+        action="store_true",
+        help="未提供 --lyric-path 时，优先从音频元数据中的内嵌歌词读取 LRC/纯文本歌词",
+    )
     parser.add_argument("--language", help="Whisper 语言参数，例如 zh / ja / en")
     parser.add_argument("--model-id", default="openai/whisper-large-v3", help="Whisper 模型目录或模型名")
     parser.add_argument(
@@ -431,22 +436,29 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  album={metadata.album}")
     print(f"  duration={metadata.duration:.2f}s")
 
-    if args.lyric_path:
+    if args.lyric_path or args.read_metadata_lyric:
         lyric = load_alignment_lyric(args.lyric_path, music_path=str(audio_path))
-        if lyric is None:
+        if lyric is None and args.lyric_path:
             raise RuntimeError(f"无法从本地歌词文件加载歌词: {args.lyric_path}")
-        search_result = {
-            "source": "local",
-            "candidate_id": None,
-            "title": metadata.title,
-            "artist": metadata.artist,
-            "album": metadata.album,
-            "match_score": None,
-        }
+        if lyric is not None:
+            search_result = {
+                "source": "metadata" if args.read_metadata_lyric and not args.lyric_path else "local",
+                "candidate_id": None,
+                "title": metadata.title,
+                "artist": metadata.artist,
+                "album": metadata.album,
+                "match_score": None,
+            }
+        else:
+            lyric, search_result = search_lyric_from_metadata(
+                metadata=metadata,
+                netease_song_id=args.netease_song_id,
+                min_search_score=args.min_search_score,
+            )
     else:
         lyric, search_result = search_lyric_from_metadata(
             metadata=metadata,
-            song_id=args.song_id,
+            netease_song_id=args.netease_song_id,
             min_search_score=args.min_search_score,
         )
 

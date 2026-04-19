@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mutagen import File as MutagenFile
 import numpy as np
 import torch
 import torchaudio
@@ -34,9 +35,28 @@ def format_time_filename(seconds: float) -> str:
     return format_time(seconds).replace(":", "-").replace(".", "_")
 
 
-def _read_embedded_mp4_lyric(music_path: str | None) -> str | None:
+def _normalize_embedded_lyric_value(value) -> str | None:
     """
-    从 m4a 的 `©lyr` 标签读取内嵌歌词。
+    将不同标签格式里的歌词值归一化为文本。
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        texts = []
+        for item in value:
+            text = _normalize_embedded_lyric_value(item)
+            if text:
+                texts.append(text)
+        return "\n".join(texts).strip() or None
+    if hasattr(value, "text"):
+        return _normalize_embedded_lyric_value(value.text)
+    text = str(value).strip()
+    return text or None
+
+
+def _read_embedded_lyric(music_path: str | None) -> str | None:
+    """
+    从常见音频标签中读取内嵌歌词。
 
     参数:
         music_path: 音频文件路径。
@@ -45,20 +65,41 @@ def _read_embedded_mp4_lyric(music_path: str | None) -> str | None:
         return None
 
     path = Path(music_path)
-    if path.suffix.lower() != ".m4a" or not path.exists():
+    if not path.exists():
         return None
 
-    from mutagen.mp4 import MP4
-
-    tags = MP4(str(path))
-    values = tags.tags.get("\xa9lyr") if tags.tags else None
-    if not values:
+    audio = MutagenFile(str(path), easy=False)
+    if audio is None:
         return None
-    if isinstance(values, list):
-        values = [str(item).strip() for item in values if str(item).strip()]
-        return "\n".join(values).strip() or None
-    text = str(values).strip()
-    return text or None
+
+    tags = getattr(audio, "tags", None)
+    if not tags:
+        return None
+
+    suffix = path.suffix.lower()
+    candidates = []
+    if suffix in {".m4a", ".mp4", ".aac", ".alac"}:
+        candidates.extend([
+            tags.get("\xa9lyr"),
+            tags.get("LYRICS"),
+        ])
+    elif suffix == ".mp3":
+        candidates.extend([
+            tags.getall("USLT") if hasattr(tags, "getall") else None,
+            tags.getall("TXXX:LYRICS") if hasattr(tags, "getall") else None,
+            tags.get("TXXX:LYRICS") if hasattr(tags, "get") else None,
+        ])
+    else:
+        for key in ("LYRICS", "lyrics", "LYRIC", "lyric", "UNSYNCEDLYRICS", "unsyncedlyrics"):
+            getter = getattr(tags, "get", None)
+            if getter is not None:
+                candidates.append(getter(key))
+
+    for value in candidates:
+        text = _normalize_embedded_lyric_value(value)
+        if text:
+            return text
+    return None
 
 
 def load_lyric_hint(lyric_path: str | None, music_path: str | None = None):
@@ -67,10 +108,10 @@ def load_lyric_hint(lyric_path: str | None, music_path: str | None = None):
 
     参数:
         lyric_path: 歌词文件路径，可为 `.lrc` 或纯文本。
-        music_path: 未传入外部歌词时，用于读取 m4a 内嵌歌词。
+        music_path: 未传入外部歌词时，用于读取音频内嵌歌词。
     """
     if not lyric_path:
-        embedded = _read_embedded_mp4_lyric(music_path)
+        embedded = _read_embedded_lyric(music_path)
         if embedded is None:
             return None
         if re.search(r"\[\d{2,}:\d{2}\.\d{2,3}\]", embedded):
@@ -93,7 +134,7 @@ def load_alignment_lyric(lyric_path: str | None, music_path: str | None = None) 
 
     参数:
         lyric_path: 外部歌词路径，可为空。
-        music_path: 未传入外部歌词时，用于读取 m4a 内嵌歌词。
+        music_path: 未传入外部歌词时，用于读取音频内嵌歌词。
     """
     lyric_data = load_lyric_hint(lyric_path, music_path=music_path)
     if lyric_data is None:
