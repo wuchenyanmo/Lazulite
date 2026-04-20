@@ -76,7 +76,7 @@ def match_kugou_search_result(
     result: dict,
     artist: str | None = None,
     album: str | None = None,
-    full_match_weight: float = 0.2,
+    full_match_weight: float = 0.4,
     name_weight: float = 0.7,
     album_weight: float = 0.2,
     artist_weight: float = 0.1,
@@ -125,8 +125,14 @@ class KugouProvider(OnlineLyricProvider):
         duration: float,
         artist: str | None = None,
         album: str | None = None,
+        score_title: str | None = None,
+        score_artist: str | None = None,
+        score_album: str | None = None,
         pagesize: int = 20,
     ) -> list[SearchCandidate]:
+        score_title = score_title if score_title is not None else title
+        score_artist = score_artist if score_artist is not None else artist
+        score_album = score_album if score_album is not None else album
         params = {
             "format": "json",
             "keyword": title,
@@ -147,7 +153,7 @@ class KugouProvider(OnlineLyricProvider):
                     artist=artist_name,
                     album=str(item.get("album_name") or "").strip() or None,
                     duration=float(item.get("duration") or 0.0),
-                    match_score=match_kugou_search_result(title, duration, item, artist, album),
+                    match_score=match_kugou_search_result(score_title, duration, item, score_artist, score_album),
                     raw=item,
                 )
             )

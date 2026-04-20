@@ -163,6 +163,9 @@ def search_lyric_from_metadata(
                     duration=metadata.duration,
                     artist=query_artist_value,
                     album=query_album_value,
+                    score_title=metadata.title,
+                    score_artist=metadata.artist,
+                    score_album=metadata.album,
                 )
                 for candidate in candidates:
                     key = f"{candidate.source}:{candidate.candidate_id}"
