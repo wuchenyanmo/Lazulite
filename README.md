@@ -34,7 +34,6 @@ pip install -r requirements.txt
 ## 用法
 
 使用本地歌词（lrc或txt格式，需要保证歌词顺序和完整性，可以没有时间戳）：
-
 ```bash
 python -m Lazulite example.m4a \
   --lyric-path example.lrc \
@@ -43,9 +42,13 @@ python -m Lazulite example.m4a \
 ```
 
 在线获取歌词：
-
 ```bash
 python -m Lazulite example.m4a
+```
+
+批处理模式（批量处理目录下的音频文件，不递归遍历）：
+```bash
+python -m Lazulite <dir>
 ```
 
 对齐模式的选择：
