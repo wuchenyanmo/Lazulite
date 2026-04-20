@@ -56,7 +56,7 @@ def match_qq_search_result(
     name_weight: float = 0.7,
     album_weight: float = 0.2,
     artist_weight: float = 0.1,
-    full_match_weight: float = 0.2,
+    full_match_weight: float = 0.4,
     duration_threshold: float = 15.0,
 ) -> float:
     song_duration = float(result.get("interval") or 0.0)
@@ -137,8 +137,14 @@ class QQMusicProvider(OnlineLyricProvider):
         duration: float,
         artist: str | None = None,
         album: str | None = None,
+        score_title: str | None = None,
+        score_artist: str | None = None,
+        score_album: str | None = None,
         limit: int = SEARCH_LIMIT,
     ) -> list[SearchCandidate]:
+        score_title = score_title if score_title is not None else title
+        score_artist = score_artist if score_artist is not None else artist
+        score_album = score_album if score_album is not None else album
         payload = {
             "comm": {"ct": "19", "cv": "1859", "uin": "0"},
             "req": {
@@ -174,7 +180,7 @@ class QQMusicProvider(OnlineLyricProvider):
                     artist=" / ".join(artist_names) if artist_names else None,
                     album=str(album_info.get("name") or album_info.get("title") or "").strip() or None,
                     duration=float(item.get("interval") or 0.0),
-                    match_score=match_qq_search_result(title, duration, item, artist, album),
+                    match_score=match_qq_search_result(score_title, duration, item, score_artist, score_album),
                     raw=item,
                 )
             )

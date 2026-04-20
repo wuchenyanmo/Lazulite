@@ -21,10 +21,6 @@ HEADER = {
     )
 }
 SEARCH_LIMIT = 20
-# 之前这里用过第三方 `apis.netstart.cn`，注释里也明确写过它“信息更全”。
-# 这次重新核对接口后，官方搜索接口已经能稳定返回当前打分所需的字段：
-# `id` / `dt` / `ar` / `al` / `alia` / `tns`。
-# 因此这里优先切回官方接口，减少对第三方服务的依赖面。
 SEARCH_163_API = "https://music.163.com/api/search/get?s={name}&type=1&offset=0&limit={limit}"
 LYRIC_163_API = "https://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&tv=-1"
 
@@ -71,7 +67,7 @@ def match_163_search_result(
     name_weight: float = 0.7,
     album_weight: float = 0.2,
     artist_weight: float = 0.1,
-    full_match_weight: float = 0.2,
+    full_match_weight: float = 0.4,
     duration_threshold: float = 15.0,
 ) -> float:
     """
@@ -126,7 +122,13 @@ class NeteaseProvider(OnlineLyricProvider):
         duration: float,
         artist: str | None = None,
         album: str | None = None,
+        score_title: str | None = None,
+        score_artist: str | None = None,
+        score_album: str | None = None,
     ) -> list[SearchCandidate]:
+        score_title = score_title if score_title is not None else title
+        score_artist = score_artist if score_artist is not None else artist
+        score_album = score_album if score_album is not None else album
         url = SEARCH_163_API.format(name=quote(title), limit=SEARCH_LIMIT)
         try:
             response = requests.get(url, headers=HEADER, timeout=(5, 7))
@@ -149,7 +151,7 @@ class NeteaseProvider(OnlineLyricProvider):
                     artist=" / ".join(artist_names) if artist_names else None,
                     album=str(album_info.get("name") or "").strip() or None,
                     duration=float(item.get("dt", item.get("duration", 0.0))) / 1000.0,
-                    match_score=match_163_search_result(title, duration, item, artist, album),
+                    match_score=match_163_search_result(score_title, duration, item, score_artist, score_album),
                     raw=item,
                 )
             )
