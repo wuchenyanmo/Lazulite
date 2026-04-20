@@ -4,7 +4,7 @@
 
 ## 功能概览
 
-- 读取音频元数据，自动搜索歌词，或直接使用本地歌词
+- 读取音频元数据，自动搜索歌词（支持酷狗、QQ、网易、LRCLIB），或直接使用本地歌词
 - 使用 Demucs 分离人声，并按人声活动做句级分片，根据双声道偏离中置的程度和人声能量评估片段分数
 - 使用 Whisper 对高价值片段转写
 - 对齐歌词，使用三种对齐模式：
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ## 用法
 
-使用本地lrc歌词：
+使用本地歌词（lrc或txt格式，需要保证歌词顺序和完整性，可以没有时间戳）：
 
 ```bash
 python -m Lazulite example.m4a \
@@ -58,4 +58,5 @@ python -m Lazulite example.m4a
 
 ## 性能
 默认模型是 Whisper-large-v3 ，参数量约1.5B，首次运行时会自动从 Hugging Face 下载模型
-在RTX 4090上测试，`offset-only`模式单首歌曲耗时30秒，峰值占用显存约5G，若回退到`hybrid`或dp-only`模式则增加至1分钟，峰值占用显存约8G
+
+在RTX 4090上测试，`offset-only`模式单首歌曲耗时30秒，峰值占用显存约5G，若回退到`hybrid`或`dp-only`模式则增加至1分钟，峰值占用显存约8G
