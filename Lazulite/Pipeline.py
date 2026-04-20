@@ -203,43 +203,99 @@ def search_lyric_from_metadata(
         provider.source_name: index
         for index, provider in enumerate(providers)
     }
+    provider_priority = {
+        provider.source_name: int(getattr(provider, "priority", 100))
+        for provider in providers
+    }
     qualified_candidates_all.sort(
         key=lambda candidate: (
+            -provider_priority.get(candidate.source, 100),
             -float(candidate.match_score),
             provider_order.get(candidate.source, len(provider_order)),
         )
     )
 
+    active_priority = None if not qualified_candidates_all else max(
+        provider_priority.get(candidate.source, 100)
+        for candidate in qualified_candidates_all
+    )
+    active_candidates = [
+        candidate
+        for candidate in qualified_candidates_all
+        if provider_priority.get(candidate.source, 100) == active_priority
+    ]
+    lower_priority_candidates = [
+        candidate
+        for candidate in qualified_candidates_all
+        if provider_priority.get(candidate.source, 100) < int(active_priority)
+    ] if active_priority is not None else []
+
     plain_text_fallback: tuple[LyricLineStamp, dict[str, Any]] | None = None
-    for candidate in qualified_candidates_all:
-        attempted_by_source.setdefault(candidate.source, []).append(
-            f"{candidate.candidate_id}({candidate.match_score:.1f})"
-        )
-        provider = provider_by_source[candidate.source]
-        try:
-            lyric = provider.fetch_lyric(candidate)
-        except Exception as exc:
-            warnings.warn(
-                f"在线歌词候选获取失败，已跳过 source={provider.source_name} candidate={candidate.candidate_id}: {exc}",
-                RuntimeWarning,
+
+    def _fetch_candidates(
+        candidates: list[Any],
+        allow_plain_text_return: bool,
+    ) -> tuple[tuple[LyricLineStamp, dict[str, Any]] | None, tuple[LyricLineStamp, dict[str, Any]] | None]:
+        plain_fallback: tuple[LyricLineStamp, dict[str, Any]] | None = None
+        for candidate in candidates:
+            attempted_by_source.setdefault(candidate.source, []).append(
+                f"{candidate.candidate_id}({candidate.match_score:.1f})"
             )
-            lyric = None
-        if lyric is not None and not getattr(lyric, "lyric_lines", []):
-            warnings.warn(
-                "在线歌词候选返回空歌词，已跳过 "
-                f"source={provider.source_name} candidate={candidate.candidate_id}",
-                RuntimeWarning,
-            )
-            lyric = None
-        if lyric is not None:
+            provider = provider_by_source[candidate.source]
+            try:
+                lyric = provider.fetch_lyric(candidate)
+            except Exception as exc:
+                warnings.warn(
+                    f"在线歌词候选获取失败，已跳过 source={provider.source_name} candidate={candidate.candidate_id}: {exc}",
+                    RuntimeWarning,
+                )
+                lyric = None
+            if lyric is not None and not getattr(lyric, "lyric_lines", []):
+                warnings.warn(
+                    "在线歌词候选返回空歌词，已跳过 "
+                    f"source={provider.source_name} candidate={candidate.candidate_id}",
+                    RuntimeWarning,
+                )
+                lyric = None
+            if lyric is None:
+                continue
+
             candidate_info = candidate.to_dict()
             if getattr(lyric, "has_real_timestamps", True):
-                return lyric, candidate_info
-            if plain_text_fallback is None:
-                plain_text_fallback = (lyric, candidate_info)
+                return (lyric, candidate_info), plain_fallback
+            if allow_plain_text_return and plain_fallback is None:
+                plain_fallback = (lyric, candidate_info)
+        return None, plain_fallback
+
+    result, plain_text_fallback = _fetch_candidates(
+        active_candidates,
+        allow_plain_text_return=True,
+    )
+    if result is not None:
+        return result
+
+    if plain_text_fallback is not None and lower_priority_candidates:
+        result, _ = _fetch_candidates(
+            lower_priority_candidates,
+            allow_plain_text_return=False,
+        )
+        if result is not None:
+            return result
 
     if plain_text_fallback is not None:
         return plain_text_fallback
+
+    result, _ = _fetch_candidates(
+        lower_priority_candidates,
+        allow_plain_text_return=False,
+    )
+    if result is not None:
+        return result
+
+    attempted_by_source = {
+        source: list(dict.fromkeys(values))
+        for source, values in attempted_by_source.items()
+    }
 
     if best_score_by_source:
         summary = ", ".join(

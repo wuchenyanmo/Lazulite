@@ -69,6 +69,7 @@ def _parse_lrclib_lyric(payload: dict) -> LyricLineStamp | None:
     return LyricLineStamp.from_plain_text("\n".join(cleaned_lines))
 class LRCLIBProvider(OnlineLyricProvider):
     source_name = "lrclib"
+    priority = 10
 
     def search(
         self,

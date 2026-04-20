@@ -33,6 +33,7 @@ class SearchCandidate:
 
 class OnlineLyricProvider(ABC):
     source_name: str
+    priority: int = 100
 
     @abstractmethod
     def search(

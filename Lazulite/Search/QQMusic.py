@@ -104,6 +104,7 @@ def _parse_qq_lyric_text(lyric_text: str) -> LyricLineStamp | None:
 
 class QQMusicProvider(OnlineLyricProvider):
     source_name = "qqmusic"
+    priority = 100
 
     def search(
         self,

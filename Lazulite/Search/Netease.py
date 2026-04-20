@@ -86,6 +86,7 @@ def match_163_search_result(
 
 class NeteaseProvider(OnlineLyricProvider):
     source_name = "netease"
+    priority = 100
 
     def search(
         self,

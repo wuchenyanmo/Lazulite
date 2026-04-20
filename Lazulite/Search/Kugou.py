@@ -96,6 +96,7 @@ def match_kugou_search_result(
 
 class KugouProvider(OnlineLyricProvider):
     source_name = "kugou"
+    priority = 100
 
     def search(
         self,
