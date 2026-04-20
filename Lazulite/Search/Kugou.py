@@ -3,13 +3,12 @@ from __future__ import annotations
 import base64
 import warnings
 
-import numpy as np
 import requests
 from requests.exceptions import RequestException, SSLError
 from urllib3.exceptions import InsecureRequestWarning
 
 from Lazulite.Lyric import LyricLineStamp
-from Lazulite.Search.Common import combined_fuzzy_score
+from Lazulite.Search.Common import SearchScoreFields, score_search_candidate
 from Lazulite.Search.Provider import OnlineLyricProvider, SearchCandidate
 from Lazulite.TextNormalize import KUGOU_ARTIST_SEPARATORS, split_text
 
@@ -70,50 +69,29 @@ def _kugou_candidate_names(result: dict) -> list[str]:
     return [str(item).strip() for item in values if item]
 
 
+def build_kugou_score_fields(result: dict) -> SearchScoreFields:
+    return SearchScoreFields(
+        duration=float(result.get("duration") or 0.0),
+        title_candidates=_kugou_candidate_names(result),
+        artist_candidates=_split_kugou_artists(result.get("singername")),
+        album_candidates=[str(result.get("album_name") or "").strip()] if str(result.get("album_name") or "").strip() else [],
+    )
+
+
 def match_kugou_search_result(
     name: str,
     duration: float,
     result: dict,
     artist: str | None = None,
     album: str | None = None,
-    full_match_weight: float = 0.4,
-    name_weight: float = 0.7,
-    album_weight: float = 0.2,
-    artist_weight: float = 0.1,
-    duration_threshold: float = 15.0,
 ) -> float:
-    result_duration = float(result.get("duration") or 0.0)
-    if np.abs(result_duration - duration) > duration_threshold:
-        return 0.0
-
-    candidate_names = _kugou_candidate_names(result)
-    score = {
-        "name": max(combined_fuzzy_score(name, item, full_match_weight=full_match_weight) for item in candidate_names)
-        if candidate_names else 0.0,
-    }
-
-    if artist is None:
-        artist_weight = 0.0
-        score["artist"] = 0.0
-    else:
-        result_artists = _split_kugou_artists(result.get("singername"))
-        score["artist"] = (
-            max(combined_fuzzy_score(artist, item, full_match_weight=full_match_weight) for item in result_artists)
-            if result_artists else 0.0
-        )
-
-    if album is None:
-        album_weight = 0.0
-        score["album"] = 0.0
-    else:
-        album_name = str(result.get("album_name") or "").strip()
-        score["album"] = combined_fuzzy_score(album, album_name, full_match_weight=full_match_weight) if album_name else 0.0
-
-    total_weight = name_weight + artist_weight + album_weight
-    if total_weight <= 0:
-        return 0.0
-    value = (name_weight * score["name"] + artist_weight * score["artist"] + album_weight * score["album"]) / total_weight
-    return float(value)
+    return score_search_candidate(
+        title=name,
+        duration=duration,
+        fields=build_kugou_score_fields(result),
+        artist=artist,
+        album=album,
+    )
 
 
 class KugouProvider(OnlineLyricProvider):
@@ -145,6 +123,7 @@ class KugouProvider(OnlineLyricProvider):
         candidates: list[SearchCandidate] = []
         for item in songs:
             artist_name = " / ".join(_split_kugou_artists(item.get("singername"))) or None
+            score_fields = build_kugou_score_fields(item)
             candidates.append(
                 SearchCandidate(
                     source=self.source_name,
@@ -152,8 +131,14 @@ class KugouProvider(OnlineLyricProvider):
                     title=str(item.get("songname") or item.get("songname_original") or "").strip(),
                     artist=artist_name,
                     album=str(item.get("album_name") or "").strip() or None,
-                    duration=float(item.get("duration") or 0.0),
-                    match_score=match_kugou_search_result(score_title, duration, item, score_artist, score_album),
+                    duration=score_fields.duration,
+                    match_score=score_search_candidate(
+                        title=score_title,
+                        duration=duration,
+                        fields=score_fields,
+                        artist=score_artist,
+                        album=score_album,
+                    ),
                     raw=item,
                 )
             )

@@ -3,12 +3,11 @@ from __future__ import annotations
 import re
 import warnings
 
-import numpy as np
 import requests
 from requests.exceptions import RequestException
 
 from Lazulite.Lyric import LyricLineStamp
-from Lazulite.Search.Common import combined_fuzzy_score, normalize_search_text
+from Lazulite.Search.Common import SearchScoreFields, normalize_search_text, score_search_candidate
 from Lazulite.Search.Provider import OnlineLyricProvider, SearchCandidate
 from Lazulite.TextNormalize import clean_text
 
@@ -21,51 +20,34 @@ RE_LRCLIB_METADATA_LINE = re.compile(r"^\[[a-zA-Z]+:.*\]$")
 SEARCH_LIMIT = 20
 
 
+def build_lrclib_score_fields(result: dict) -> SearchScoreFields:
+    return SearchScoreFields(
+        duration=float(result.get("duration") or 0.0),
+        title_candidates=[
+            item for item in [
+                str(result.get("trackName") or "").strip(),
+                str(result.get("name") or "").strip(),
+            ] if item
+        ],
+        artist_candidates=[artist_name] if (artist_name := str(result.get("artistName") or "").strip()) else [],
+        album_candidates=[album_name] if (album_name := str(result.get("albumName") or "").strip()) else [],
+    )
+
+
 def match_lrclib_search_result(
     name: str,
     duration: float,
     result: dict,
     artist: str | None = None,
     album: str | None = None,
-    name_weight: float = 0.7,
-    album_weight: float = 0.2,
-    artist_weight: float = 0.1,
-    full_match_weight: float = 0.4,
-    duration_threshold: float = 15.0,
 ) -> float:
-    song_duration = float(result.get("duration") or 0.0)
-    if np.abs(song_duration - duration) > duration_threshold:
-        return 0.0
-
-    result_names = [
-        str(result.get("trackName") or "").strip(),
-        str(result.get("name") or "").strip(),
-    ]
-    result_names = [item for item in result_names if item]
-    score = {
-        "name": max(combined_fuzzy_score(name, item, full_match_weight=full_match_weight) for item in result_names)
-        if result_names else 0.0,
-    }
-
-    if artist is None:
-        artist_weight = 0.0
-        score["artist"] = 0.0
-    else:
-        artist_name = str(result.get("artistName") or "").strip()
-        score["artist"] = combined_fuzzy_score(artist, artist_name, full_match_weight=full_match_weight) if artist_name else 0.0
-
-    if album is None:
-        album_weight = 0.0
-        score["album"] = 0.0
-    else:
-        album_name = str(result.get("albumName") or "").strip()
-        score["album"] = combined_fuzzy_score(album, album_name, full_match_weight=full_match_weight) if album_name else 0.0
-
-    total_weight = name_weight + artist_weight + album_weight
-    if total_weight <= 0:
-        return 0.0
-    value = (name_weight * score["name"] + artist_weight * score["artist"] + album_weight * score["album"]) / total_weight
-    return float(value)
+    return score_search_candidate(
+        title=name,
+        duration=duration,
+        fields=build_lrclib_score_fields(result),
+        artist=artist,
+        album=album,
+    )
 
 
 def _parse_lrclib_lyric(payload: dict) -> LyricLineStamp | None:
@@ -145,6 +127,7 @@ class LRCLIBProvider(OnlineLyricProvider):
         results = list(results_by_id.values())[:max(1, int(limit))]
         candidates: list[SearchCandidate] = []
         for item in results:
+            score_fields = build_lrclib_score_fields(item)
             candidates.append(
                 SearchCandidate(
                     source=self.source_name,
@@ -152,8 +135,14 @@ class LRCLIBProvider(OnlineLyricProvider):
                     title=str(item.get("trackName") or item.get("name") or "").strip(),
                     artist=str(item.get("artistName") or "").strip() or None,
                     album=str(item.get("albumName") or "").strip() or None,
-                    duration=float(item.get("duration") or 0.0),
-                    match_score=match_lrclib_search_result(score_title, duration, item, score_artist, score_album),
+                    duration=score_fields.duration,
+                    match_score=score_search_candidate(
+                        title=score_title,
+                        duration=duration,
+                        fields=score_fields,
+                        artist=score_artist,
+                        album=score_album,
+                    ),
                     raw=item,
                 )
             )

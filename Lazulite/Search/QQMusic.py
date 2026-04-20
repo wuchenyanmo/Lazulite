@@ -4,12 +4,11 @@ import base64
 import warnings
 from itertools import chain
 
-import numpy as np
 import requests
 from requests.exceptions import RequestException
 
 from Lazulite.Lyric import LyricLineStamp
-from Lazulite.Search.Common import combined_fuzzy_score
+from Lazulite.Search.Common import SearchScoreFields, score_search_candidate
 from Lazulite.Search.Provider import OnlineLyricProvider, SearchCandidate
 from Lazulite.TextNormalize import clean_text, unique_non_empty_texts
 
@@ -47,60 +46,35 @@ def parse_qq_artist_dict(artist_dict: dict) -> list[str]:
     return unique_non_empty_texts([artist_dict.get("name"), artist_dict.get("title")])
 
 
+def build_qq_score_fields(result: dict) -> SearchScoreFields:
+    album_info = _song_album(result)
+    result_artists = [parse_qq_artist_dict(item) for item in _song_artists(result)]
+    return SearchScoreFields(
+        duration=float(result.get("interval") or 0.0),
+        title_candidates=unique_non_empty_texts([result.get("name"), *_song_aliases(result)]),
+        artist_candidates=unique_non_empty_texts(chain(*result_artists)),
+        album_candidates=unique_non_empty_texts([
+            album_info.get("name"),
+            album_info.get("title"),
+            album_info.get("subtitle"),
+        ]),
+    )
+
+
 def match_qq_search_result(
     name: str,
     duration: float,
     result: dict,
     artist: str | None = None,
     album: str | None = None,
-    name_weight: float = 0.7,
-    album_weight: float = 0.2,
-    artist_weight: float = 0.1,
-    full_match_weight: float = 0.4,
-    duration_threshold: float = 15.0,
 ) -> float:
-    song_duration = float(result.get("interval") or 0.0)
-    if np.abs(song_duration - duration) > duration_threshold:
-        return 0.0
-
-    result_names = [str(result.get("name") or "").strip(), *_song_aliases(result)]
-    result_names = [item for item in result_names if item]
-    score = {
-        "name": max(combined_fuzzy_score(name, item, full_match_weight=full_match_weight) for item in result_names)
-        if result_names else 0.0,
-    }
-
-    if artist is None:
-        artist_weight = 0.0
-        score["artist"] = 0.0
-    else:
-        result_artists = [parse_qq_artist_dict(item) for item in _song_artists(result)]
-        result_artists = list(chain(*result_artists))
-        score["artist"] = (
-            max(combined_fuzzy_score(artist, item, full_match_weight=full_match_weight) for item in result_artists)
-            if result_artists else 0.0
-        )
-
-    album_info = _song_album(result)
-    if album is None or not album_info:
-        album_weight = 0.0
-        score["album"] = 0.0
-    else:
-        result_albums = unique_non_empty_texts([
-            album_info.get("name"),
-            album_info.get("title"),
-            album_info.get("subtitle"),
-        ])
-        score["album"] = (
-            max(combined_fuzzy_score(album, item, full_match_weight=full_match_weight) for item in result_albums)
-            if result_albums else 0.0
-        )
-
-    total_weight = name_weight + artist_weight + album_weight
-    if total_weight <= 0:
-        return 0.0
-    value = (name_weight * score["name"] + artist_weight * score["artist"] + album_weight * score["album"]) / total_weight
-    return float(value)
+    return score_search_candidate(
+        title=name,
+        duration=duration,
+        fields=build_qq_score_fields(result),
+        artist=artist,
+        album=album,
+    )
 
 
 def _decode_qq_lyric_text(text: str | None) -> str:
@@ -172,6 +146,7 @@ class QQMusicProvider(OnlineLyricProvider):
         for item in songs:
             artist_names = list(chain(*[parse_qq_artist_dict(artist_item) for artist_item in _song_artists(item)]))
             album_info = _song_album(item)
+            score_fields = build_qq_score_fields(item)
             candidates.append(
                 SearchCandidate(
                     source=self.source_name,
@@ -179,8 +154,14 @@ class QQMusicProvider(OnlineLyricProvider):
                     title=str(item.get("name") or item.get("title") or "").strip(),
                     artist=" / ".join(artist_names) if artist_names else None,
                     album=str(album_info.get("name") or album_info.get("title") or "").strip() or None,
-                    duration=float(item.get("interval") or 0.0),
-                    match_score=match_qq_search_result(score_title, duration, item, score_artist, score_album),
+                    duration=score_fields.duration,
+                    match_score=score_search_candidate(
+                        title=score_title,
+                        duration=duration,
+                        fields=score_fields,
+                        artist=score_artist,
+                        album=score_album,
+                    ),
                     raw=item,
                 )
             )
