@@ -99,6 +99,7 @@ def search_lyric_from_metadata(
     metadata: AudioMetadata,
     netease_song_id: str | int | None = None,
     min_search_score: float = 55.0,
+    search_workers: int = 4,
 ) -> tuple[LyricLineStamp, dict[str, Any]]:
     if netease_song_id is not None:
         provider = NeteaseProvider()
@@ -135,7 +136,7 @@ def search_lyric_from_metadata(
 
     qualified_candidates_all: list[Any] = []
 
-    for provider in providers:
+    def _search_provider_candidates(provider):
         deduped_candidates: dict[str, Any] = {}
         for title_variant in title_variants:
             query_artist = artist_variants[0] or None
@@ -173,23 +174,29 @@ def search_lyric_from_metadata(
                     if existing is None or float(candidate.match_score) > float(existing.match_score):
                         deduped_candidates[key] = candidate
 
-        candidates = sorted(
+        return provider.source_name, sorted(
             deduped_candidates.values(),
             key=lambda item: float(item.match_score),
             reverse=True,
         )
+
+    max_search_workers = max(1, min(int(search_workers), len(providers)))
+    with ThreadPoolExecutor(max_workers=max_search_workers, thread_name_prefix="provider-search") as executor:
+        provider_results = list(executor.map(_search_provider_candidates, providers))
+
+    for source_name, candidates in provider_results:
         if not candidates:
-            attempted_by_source[provider.source_name] = []
+            attempted_by_source[source_name] = []
             continue
 
-        best_score_by_source[provider.source_name] = float(candidates[0].match_score)
-        top_candidate_by_source[provider.source_name] = candidates[0].to_dict()
+        best_score_by_source[source_name] = float(candidates[0].match_score)
+        top_candidate_by_source[source_name] = candidates[0].to_dict()
         qualified_candidates = [
             candidate
             for candidate in candidates
             if float(candidate.match_score) >= min_search_score
         ]
-        attempted_by_source[provider.source_name] = []
+        attempted_by_source[source_name] = []
         qualified_candidates_all.extend(qualified_candidates)
 
     provider_order = {
@@ -588,6 +595,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-mode", default="hybrid", choices=["none", "previous", "hint", "hybrid"])
     parser.add_argument("--num-candidates", type=int, default=1, help="每个分片重复转写次数")
     parser.add_argument("--min-search-score", type=float, default=55.0, help="歌词搜索最低接受分数")
+    parser.add_argument("--search-workers", type=int, default=4, help="在线歌词 provider 搜索并发数")
     parser.add_argument("--output-lrc", help="将最终对齐歌词额外保存为 .lrc 文件")
     parser.add_argument("--transcription-json", help="将分片转写结果额外保存为 JSON")
     parser.add_argument("--alignment-json", help="将对齐结果额外保存为 JSON")
@@ -637,6 +645,7 @@ def _resolve_lyric_source(
         metadata=metadata,
         netease_song_id=args.netease_song_id,
         min_search_score=args.min_search_score,
+        search_workers=args.search_workers,
     )
 
 
