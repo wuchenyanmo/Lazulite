@@ -424,6 +424,23 @@ class OffsetAligner:
         lyric_lines = lyric.lyric_lines
         if not lyric_lines:
             return LyricAlignmentResult(music_path=music_path, items=[], strategy="offset")
+        if not getattr(lyric, "has_real_timestamps", True):
+            return LyricAlignmentResult(
+                music_path=music_path,
+                items=[],
+                strategy="offset",
+                details={
+                    "is_reliable": False,
+                    "fallback_reason": "missing_lyric_timestamps",
+                    "candidate_count": 0,
+                    "anchor_count": 0,
+                    "cluster_anchor_count": 0,
+                    "reliable_anchor_count": 0,
+                    "merged_sections": [],
+                    "sections": [],
+                    "anchors": [],
+                },
+            )
 
         section_to_merged, merged_sections = self._merge_sections(chunks)
         candidates = self._build_anchor_candidates(

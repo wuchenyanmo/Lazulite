@@ -1,4 +1,5 @@
 .conda
+.codex
 .vscode
 model
 music-source/*

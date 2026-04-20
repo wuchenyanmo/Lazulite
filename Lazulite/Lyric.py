@@ -1,15 +1,14 @@
 import re
-import unicodedata
 from collections import Counter
+from Lazulite.TextNormalize import RE_SPACES, normalize_text
 
 # 基础 LRC 解析规则
 RE_METADATA = re.compile(r'^\[([a-zA-Z]+):(.*)\]$')
 RE_LYRICS = re.compile(r'^\[(\d{2,}:\d{2}\.\d{2,3})\](.*)$')
-RE_SPACES = re.compile(r'\s+')
-
 # 匹配日文歌词中常见的汉字(假名)注音，用于规范化时去掉括号内读音
 RE_FURIGANA = re.compile(r'([\u3400-\u4dbf\u4e00-\u9fff々〆ヵヶ]+)\(([\u3040-\u30ffー・ ]+)\)')
 RE_METADATA_SEP = re.compile(r'\s*[:：|｜]\s*')
+RE_LYRIC_QUOTES = re.compile(r'[「」『』【】〈〉《》〔〕〘〙〚〛“”‘’"]+')
 
 # 行首歌手/角色标记的几种常见形式
 RE_SINGER_COLON = re.compile(r'^(?P<label>[^\s:：|｜]{1,24})\s*[:：|｜]\s*(?P<body>.+)$')
@@ -44,7 +43,7 @@ class LyricTokenLine:
     '''
     def __init__(
         self,
-        timestamp: float,
+        timestamp: float | None,
         raw_text: str,
         text: str,
         normalized_text: str,
@@ -58,7 +57,7 @@ class LyricTokenLine:
         初始化单行歌词对象。
 
         参数:
-            timestamp: 行级时间戳，单位为秒。
+            timestamp: 行级时间戳，单位为秒；纯文本歌词时可为 None。
             raw_text: 原始歌词文本，不做改写。
             text: 清洗后的正文文本。
             normalized_text: 适合后续对齐的规范化文本。
@@ -93,6 +92,7 @@ class LyricLineStamp:
         self.metadata = {}
         self.metadata_keys = []
         self.line_infos = []
+        self.has_real_timestamps = False
 
         for line in lrc.splitlines():
             line = line.strip()
@@ -113,10 +113,26 @@ class LyricLineStamp:
             minute, second = timestamp.split(':')
             parsed = self._parse_lyric_line(60 * float(minute) + float(second), text)
             self.line_infos.append(parsed)
+            self.has_real_timestamps = True
 
             if parsed.is_metadata:
                 self._add_metadata(parsed.metadata_key or 'meta', parsed.metadata_value or parsed.text)
                 continue
+
+    @classmethod
+    def _from_line_infos(
+        cls,
+        line_infos: list[LyricTokenLine],
+        metadata: dict[str, str] | None = None,
+        metadata_keys: list[str] | None = None,
+        has_real_timestamps: bool = False,
+    ):
+        lyric = cls("")
+        lyric.line_infos = line_infos
+        lyric.metadata = dict(metadata or {})
+        lyric.metadata_keys = list(metadata_keys or [])
+        lyric.has_real_timestamps = has_real_timestamps
+        return lyric
 
     @classmethod
     def from_plain_text(cls, text: str):
@@ -127,20 +143,16 @@ class LyricLineStamp:
             text: 按行分隔的纯文本歌词。
 
         说明:
-            这里会为每行生成递增的伪时间戳，仅用于保留歌词顺序，
-            方便后续做约束对齐；这些时间戳不代表真实演唱时间。
+            纯文本歌词只保留顺序，不再伪造时间戳。
+            这样可以避免 offset-only 把“顺序信息”误当成真实时间轴。
         """
-        lines = []
-        pseudo_time = 0.0
+        line_infos: list[LyricTokenLine] = []
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
-            minute = int(pseudo_time // 60)
-            second = pseudo_time % 60
-            lines.append(f"[{minute:02d}:{second:05.2f}]{line}")
-            pseudo_time += 1.0
-        return cls("\n".join(lines))
+            line_infos.append(cls._parse_lyric_line(None, line))
+        return cls._from_line_infos(line_infos=line_infos, has_real_timestamps=False)
 
     @property
     def lyric_lines(self) -> list[LyricTokenLine]:
@@ -153,12 +165,12 @@ class LyricLineStamp:
         return [line for line in self.line_infos if not line.is_metadata]
 
     @property
-    def timestamps(self) -> list[float]:
+    def timestamps(self) -> list[float | None]:
         """
         获取歌词时间戳列表。
 
         返回:
-            与歌词行一一对应的秒级时间戳列表。
+            与歌词行一一对应的秒级时间戳列表；纯文本歌词时元素可为 None。
         """
         return [line.timestamp for line in self.lyric_lines]
 
@@ -228,15 +240,7 @@ class LyricLineStamp:
         返回:
             归一化后的文本。
         """
-        text = unicodedata.normalize('NFKC', text)
-        text = text.replace('’', "'").replace('`', "'")
-        text = text.replace('“', '"').replace('”', '"')
-        text = text.strip()
-        if keep_spaces:
-            text = RE_SPACES.sub(' ', text)
-        else:
-            text = ''.join(text.split())
-        return text
+        return normalize_text(text, keep_spaces=keep_spaces)
 
     @classmethod
     def normalize_lyric_text(cls, text: str) -> str:
@@ -251,6 +255,7 @@ class LyricLineStamp:
         """
         text = cls.normalize_plain_text(text)
         text = RE_FURIGANA.sub(r'\1', text)
+        text = RE_LYRIC_QUOTES.sub(' ', text)
         text = re.sub(r'[·•♪♬♫]+', ' ', text)
         text = re.sub(r'[，。！？、,.!?;；:：~～…]+', ' ', text)
         text = RE_SPACES.sub(' ', text).strip()
@@ -291,12 +296,12 @@ class LyricLineStamp:
         return key, value
 
     @classmethod
-    def _metadata_score(cls, timestamp: float, raw_text: str) -> tuple[int, str | None, str | None]:
+    def _metadata_score(cls, timestamp: float | None, raw_text: str) -> tuple[int, str | None, str | None]:
         """
         用弱规则为一行文本计算元数据倾向分数。
 
         参数:
-            timestamp: 当前行时间戳，单位为秒。
+            timestamp: 当前行时间戳，单位为秒；纯文本歌词时可为 None。
             raw_text: 当前行文本。
 
         返回:
@@ -317,12 +322,12 @@ class LyricLineStamp:
             if cls._looks_like_metadata_label(key):
                 score += 4
                 metadata_key, metadata_value = key, value
-            elif timestamp <= 20 and len(key) <= 12 and len(value) <= 40:
+            elif timestamp is not None and timestamp <= 20 and len(key) <= 12 and len(value) <= 40:
                 score += 2
                 metadata_key, metadata_value = key, value
 
         # 早期短行更容易是“作词/作曲/演唱”之类的头部信息
-        if timestamp <= 20:
+        if timestamp is not None and timestamp <= 20:
             score += 1
         if len(text) <= 24:
             score += 1
@@ -386,12 +391,12 @@ class LyricLineStamp:
         return None, text
 
     @classmethod
-    def _parse_lyric_line(cls, timestamp: float, raw_text: str) -> LyricTokenLine:
+    def _parse_lyric_line(cls, timestamp: float | None, raw_text: str) -> LyricTokenLine:
         """
         解析单行歌词，识别元数据、歌手标记与规范化文本。
 
         参数:
-            timestamp: 行级时间戳，单位为秒。
+            timestamp: 行级时间戳，单位为秒；纯文本歌词时可为 None。
             raw_text: 原始行文本。
 
         返回:
@@ -465,6 +470,8 @@ class LyricLineStamp:
                 lrc.append(f"[{key}:{self.metadata[key]}]")
         for line in self.lyric_lines:
             timestamp = line.timestamp
+            if timestamp is None:
+                raise ValueError("当前歌词对象缺少真实时间戳，无法直接导出为 LRC")
             text = line.text
             minute = int(timestamp // 60)
             second = timestamp % 60
@@ -484,18 +491,27 @@ class LyricLineStamp:
         lyric_lines = self.lyric_lines
         for line_info in lyric_lines:
             line_info.translation = ''
+        translation_items: list[str] = []
         for line in translation_lrc.splitlines():
             line = line.strip()
             lyric_match = RE_LYRICS.match(line)
             if lyric_match:
                 timestamp_str, text = lyric_match.groups()
+                translation_items.append(text)
                 minute, second = timestamp_str.split(':')
                 trans_timestamp = 60 * float(minute) + float(second)
+                if not self.has_real_timestamps:
+                    continue
                 closest_idx = min(
                     range(len(lyric_lines)),
-                    key=lambda i: abs(lyric_lines[i].timestamp - trans_timestamp)
+                    key=lambda i: abs(float(lyric_lines[i].timestamp or 0.0) - trans_timestamp)
                 )
                 lyric_lines[closest_idx].translation = text
+        if not self.has_real_timestamps:
+            for idx, text in enumerate(translation_items):
+                if idx >= len(lyric_lines):
+                    break
+                lyric_lines[idx].translation = text
 
     def clean_translation(self, brackets: set[str] = TRANSLATION_BRACKETS,
                           threshold: float = 0.8, only_detect: bool = False) -> str | None:

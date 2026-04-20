@@ -166,7 +166,7 @@ class LyricAligner:
         skip_chunk_penalty: float = 0.24,
         min_match_similarity: float = 0.08,
         max_chunks_per_line: int = 2,
-        max_lines_per_chunk: int = 2,
+        max_lines_per_chunk: int = 4,
     ):
         """
         初始化对齐器。
@@ -183,6 +183,12 @@ class LyricAligner:
         self.min_match_similarity = min_match_similarity
         self.max_chunks_per_line = max_chunks_per_line
         self.max_lines_per_chunk = max_lines_per_chunk
+        self.token_skip_penalty = 0.018
+        self.boundary_trim_penalty = 0.010
+
+    @staticmethod
+    def _clip(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, float(value)))
 
     @staticmethod
     def _char_ngrams(text: str, n: int) -> set[str]:
@@ -321,6 +327,81 @@ class LyricAligner:
             result.append(value)
         return result
 
+    @staticmethod
+    def _weighted_median(values: list[tuple[float, float]]) -> float | None:
+        clean = [
+            (float(value), max(float(weight), 0.0))
+            for value, weight in values
+            if value is not None and weight is not None and float(weight) > 0.0
+        ]
+        if not clean:
+            return None
+        clean.sort(key=lambda item: item[0])
+        total_weight = sum(weight for _, weight in clean)
+        threshold = total_weight / 2.0
+        cumulative = 0.0
+        for value, weight in clean:
+            cumulative += weight
+            if cumulative >= threshold:
+                return float(value)
+        return float(clean[-1][0])
+
+    @staticmethod
+    def _prefix_similarity(a: str, b: str, prefix_chars: int = 12) -> float:
+        a = LyricLineStamp.normalize_lyric_text(a)
+        b = LyricLineStamp.normalize_lyric_text(b)
+        if not a or not b:
+            return 0.0
+        usable = min(len(a), len(b), max(prefix_chars, 1))
+        return float(SequenceMatcher(None, a[:usable], b[:usable]).ratio())
+
+    def _item_alignment_reliability(self, item: AlignedLyricLine) -> float:
+        prefix_similarity = self._prefix_similarity(
+            item.line.normalized_text,
+            item.chunk_text or "",
+        )
+        confidence = self._clip(float(item.confidence or 0.0), 0.0, 1.0)
+        hallucination = self._clip(float(item.hallucination_risk or 1.0), 0.0, 1.0)
+        reliability = (
+            0.58 * prefix_similarity
+            + 0.27 * confidence
+            + 0.15 * (1.0 - hallucination)
+        )
+        return self._clip(reliability, 0.0, 1.0)
+
+    @staticmethod
+    def _infer_item_section_index(
+        item: AlignedLyricLine,
+        chunk_section_by_segment: dict[int, int | None],
+    ) -> int | None:
+        section_indices = [
+            chunk_section_by_segment.get(segment_index)
+            for segment_index in item.chunk_indices
+            if chunk_section_by_segment.get(segment_index) is not None
+        ]
+        if not section_indices:
+            return None
+        counts: dict[int, int] = {}
+        for section_index in section_indices:
+            counts[int(section_index)] = counts.get(int(section_index), 0) + 1
+        return max(counts.items(), key=lambda pair: pair[1])[0]
+
+    @staticmethod
+    def _smooth_monotonic_timestamps(
+        starts: list[float | None],
+        min_gap: float = 0.02,
+    ) -> list[float | None]:
+        result = [None if value is None else float(value) for value in starts]
+        previous = None
+        for idx, value in enumerate(result):
+            if value is None:
+                continue
+            if previous is not None and value < previous + min_gap:
+                value = previous + min_gap
+                result[idx] = value
+            previous = value
+        return result
+
     def _flatten_chunk_token_entries(self, chunks: list[WhisperChunkResult]) -> list[dict]:
         """
         将若干 chunk 的 token 时间戳展开成带绝对时间的统一序列。
@@ -381,72 +462,153 @@ class LyricAligner:
         off_center: float,
     ) -> dict | None:
         """
-        在 token 边界上为两行歌词寻找最佳切点。
+        在 token 边界上为多行歌词寻找最佳切分。
 
         参数:
-            lyric_lines: 连续歌词行列表，仅支持两行。
+            lyric_lines: 连续歌词行列表。
             chunks: 连续转写 chunk 列表。
             confidence: 窗口平均置信度。
             hallucination: 窗口平均幻觉风险。
             presence: 窗口平均人声存在分数。
             off_center: 窗口平均偏离中置风险。
         """
-        if len(lyric_lines) != 2:
+        line_count = len(lyric_lines)
+        if line_count < 2:
             return None
 
         token_entries = self._flatten_chunk_token_entries(chunks)
-        if len(token_entries) < 2:
+        token_count = len(token_entries)
+        if token_count < line_count:
             return None
 
         merge_penalty = self._merge_penalty(len(lyric_lines), len(chunks))
-        best: dict | None = None
-        for split_idx in range(1, len(token_entries)):
-            left_entries = token_entries[:split_idx]
-            right_entries = token_entries[split_idx:]
-            left_text = self._join_token_texts(left_entries)
-            right_text = self._join_token_texts(right_entries)
-            if not left_text or not right_text:
+        span_text_cache: dict[tuple[int, int], str] = {}
+        span_sim_cache: dict[tuple[int, int, int], float] = {}
+
+        def _span_text(start_idx: int, end_idx: int) -> str:
+            key = (start_idx, end_idx)
+            if key not in span_text_cache:
+                span_text_cache[key] = self._join_token_texts(token_entries[start_idx:end_idx])
+            return span_text_cache[key]
+
+        def _span_similarity(line_idx: int, start_idx: int, end_idx: int) -> float:
+            key = (line_idx, start_idx, end_idx)
+            if key not in span_sim_cache:
+                span_sim_cache[key] = self.text_similarity(
+                    lyric_lines[line_idx].normalized_text,
+                    _span_text(start_idx, end_idx),
+                )
+            return span_sim_cache[key]
+
+        dp = [[float("-inf")] * (token_count + 1) for _ in range(line_count + 1)]
+        back: list[list[tuple[int, int] | None]] = [[None] * (token_count + 1) for _ in range(line_count + 1)]
+
+        for skipped in range(token_count + 1):
+            dp[0][skipped] = -self.boundary_trim_penalty * skipped
+
+        for line_idx in range(1, line_count + 1):
+            remaining_lines = line_count - line_idx
+            min_end = line_idx
+            max_end = token_count - remaining_lines
+            prefix_best_score = [float("-inf")] * (token_count + 1)
+            prefix_best_end: list[int | None] = [None] * (token_count + 1)
+            running_best = float("-inf")
+            running_best_end: int | None = None
+            for pos in range(line_idx - 1, token_count + 1):
+                candidate = dp[line_idx - 1][pos] + self.token_skip_penalty * pos
+                if candidate > running_best:
+                    running_best = candidate
+                    running_best_end = pos
+                prefix_best_score[pos] = running_best
+                prefix_best_end[pos] = running_best_end
+            for end_idx in range(min_end, max_end + 1):
+                best_score = float("-inf")
+                best_prev: tuple[int, int] | None = None
+                min_start = line_idx - 1
+                max_start = end_idx - 1
+                for start_idx in range(min_start, max_start + 1):
+                    prev_end_choice = prefix_best_end[start_idx]
+                    if prev_end_choice is None:
+                        continue
+                    prev_best = prefix_best_score[start_idx] - self.token_skip_penalty * start_idx
+                    if prev_end_choice is None:
+                        continue
+
+                    similarity = _span_similarity(line_idx - 1, start_idx, end_idx)
+                    span_score = 1.22 * similarity
+                    if similarity < self.min_match_similarity:
+                        span_score -= 0.32
+                    candidate_score = prev_best + span_score
+                    if candidate_score > best_score:
+                        best_score = candidate_score
+                        best_prev = (prev_end_choice, start_idx)
+
+                dp[line_idx][end_idx] = best_score
+                back[line_idx][end_idx] = best_prev
+
+        best_final_score = float("-inf")
+        best_final_end: int | None = None
+        for end_idx in range(line_count, token_count + 1):
+            base_score = dp[line_count][end_idx]
+            if base_score == float("-inf"):
                 continue
+            trailing_skip = token_count - end_idx
+            candidate_score = base_score - self.boundary_trim_penalty * trailing_skip
+            if candidate_score > best_final_score:
+                best_final_score = candidate_score
+                best_final_end = end_idx
 
-            left_similarity = self.text_similarity(lyric_lines[0].normalized_text, left_text)
-            right_similarity = self.text_similarity(lyric_lines[1].normalized_text, right_text)
-            score = (
-                1.22 * left_similarity
-                + 1.22 * right_similarity
-                + 0.16 * confidence
-                + 0.08 * presence
-                - 0.40 * hallucination
-                - 0.10 * off_center
-                - merge_penalty
+        if best_final_end is None:
+            return None
+
+        spans: list[tuple[int, int]] = []
+        line_idx = line_count
+        end_idx = best_final_end
+        while line_idx > 0:
+            prev = back[line_idx][end_idx]
+            if prev is None:
+                return None
+            prev_end_idx, start_idx = prev
+            spans.append((start_idx, end_idx))
+            end_idx = prev_end_idx
+            line_idx -= 1
+        spans.reverse()
+
+        line_assignments = []
+        similarities = []
+        for line_idx, (start_idx, end_idx) in enumerate(spans):
+            span_entries = token_entries[start_idx:end_idx]
+            if not span_entries:
+                return None
+            span_text = _span_text(start_idx, end_idx)
+            if not span_text:
+                return None
+            similarity = _span_similarity(line_idx, start_idx, end_idx)
+            similarities.append(similarity)
+            line_assignments.append(
+                {
+                    "chunk_indices": self._ordered_unique([entry["segment_index"] for entry in span_entries]),
+                    "chunk_text": span_text,
+                    "start": float(span_entries[0]["start"]),
+                    "end": float(span_entries[-1]["end"]),
+                    "similarity": similarity,
+                }
             )
-            if min(left_similarity, right_similarity) < self.min_match_similarity:
-                score -= 0.32
 
-            line_assignments = [
-                {
-                    "chunk_indices": self._ordered_unique([entry["segment_index"] for entry in left_entries]),
-                    "chunk_text": left_text,
-                    "start": float(left_entries[0]["start"]),
-                    "end": float(left_entries[-1]["end"]),
-                    "similarity": left_similarity,
-                },
-                {
-                    "chunk_indices": self._ordered_unique([entry["segment_index"] for entry in right_entries]),
-                    "chunk_text": right_text,
-                    "start": float(right_entries[0]["start"]),
-                    "end": float(right_entries[-1]["end"]),
-                    "similarity": right_similarity,
-                },
-            ]
-            similarity = float((left_similarity + right_similarity) / 2.0)
-            candidate = {
-                "score": score,
-                "similarity": similarity,
-                "line_assignments": line_assignments,
-            }
-            if best is None or candidate["score"] > best["score"]:
-                best = candidate
-        return best
+        score = (
+            best_final_score
+            + 0.16 * confidence
+            + 0.08 * presence
+            - 0.40 * hallucination
+            - 0.10 * off_center
+            - merge_penalty
+        )
+        similarity = float(np.mean(similarities)) if similarities else 0.0
+        return {
+            "score": score,
+            "similarity": similarity,
+            "line_assignments": line_assignments,
+        }
 
     def text_similarity(self, lyric_text: str, chunk_text: str) -> float:
         """
@@ -528,7 +690,13 @@ class LyricAligner:
             "similarity": similarity,
             "line_assignments": None,
         }
-        if line_count == 2:
+        split_similarity_gate = 0.18 if line_count == 2 else 0.24
+        should_try_split = (
+            line_count >= 2
+            and (line_count == 2 or chunk_count == 1)
+            and similarity >= split_similarity_gate
+        )
+        if should_try_split:
             split_match = self._best_token_boundary_split(
                 lyric_lines=lyric_lines,
                 chunks=chunks,
@@ -728,3 +896,132 @@ class LyricAligner:
             )
 
         return LyricAlignmentResult(music_path=music_path, items=items)
+
+    def refine_with_lyric_timestamps(
+        self,
+        lyric: LyricLineStamp,
+        alignment_result: LyricAlignmentResult,
+        transcription: WhisperTrackResult | dict,
+    ) -> LyricAlignmentResult:
+        """
+        用原歌词时间轴对 DP 对齐结果做稳健后处理。
+
+        说明:
+            仅在歌词本身包含真实时间戳时启用。它会：
+            1. 从 DP 结果中选取较可靠的 matched 行作为锚点。
+            2. 估计全局或分段 offset。
+            3. 将 DP start 与 `lyric_timestamp + offset` 融合。
+            4. 再做一次单调平滑，减少局部错词对起始时间的污染。
+        """
+        if not getattr(lyric, "has_real_timestamps", True):
+            return alignment_result
+
+        _, chunk_list = self._coerce_chunks(transcription)
+        chunk_section_by_segment = {
+            int(chunk.segment_index): chunk.section_index
+            for chunk in chunk_list
+        }
+
+        anchor_items = []
+        section_offsets_raw: dict[int, list[tuple[float, float]]] = {}
+        weighted_offsets: list[tuple[float, float]] = []
+
+        for item in alignment_result.items:
+            if item.start is None or item.line.timestamp is None:
+                continue
+            reliability = self._item_alignment_reliability(item)
+            if reliability < 0.24:
+                continue
+            offset = float(item.start - item.line.timestamp)
+            weighted_offsets.append((offset, reliability))
+            section_index = self._infer_item_section_index(item, chunk_section_by_segment)
+            if section_index is not None:
+                section_offsets_raw.setdefault(section_index, []).append((offset, reliability))
+            anchor_items.append(
+                {
+                    "line_index": item.line_index,
+                    "offset": offset,
+                    "reliability": reliability,
+                    "section_index": section_index,
+                }
+            )
+
+        global_offset = self._weighted_median(weighted_offsets)
+        if global_offset is None:
+            return alignment_result
+
+        section_offsets: dict[int, float] = {}
+        for section_index, values in section_offsets_raw.items():
+            if len(values) < 2:
+                continue
+            offset = self._weighted_median(values)
+            if offset is not None:
+                section_offsets[int(section_index)] = float(offset)
+
+        refined = LyricAlignmentResult(
+            music_path=alignment_result.music_path,
+            items=[
+                AlignedLyricLine(
+                    line_index=item.line_index,
+                    line=item.line,
+                    normalized_text=item.normalized_text,
+                    chunk_indices=list(item.chunk_indices),
+                    chunk_text=item.chunk_text,
+                    start=item.start,
+                    end=item.end,
+                    similarity=item.similarity,
+                    score=item.score,
+                    confidence=item.confidence,
+                    hallucination_risk=item.hallucination_risk,
+                )
+                for item in alignment_result.items
+            ],
+            strategy=alignment_result.strategy,
+            details=dict(alignment_result.details or {}),
+        )
+
+        refined_starts: list[float | None] = []
+        duration_hints: list[float | None] = []
+
+        for item in refined.items:
+            duration = None
+            if item.start is not None and item.end is not None:
+                duration = max(0.0, float(item.end - item.start))
+            duration_hints.append(duration)
+
+            if item.line.timestamp is None:
+                refined_starts.append(None if item.start is None else float(item.start))
+                continue
+
+            section_index = self._infer_item_section_index(item, chunk_section_by_segment)
+            offset = section_offsets.get(section_index, global_offset)
+            prior = max(0.0, float(item.line.timestamp + float(offset)))
+
+            refined_starts.append(prior)
+
+        refined_starts = self._smooth_monotonic_timestamps(refined_starts)
+
+        next_known_start = None
+        for idx in range(len(refined.items) - 1, -1, -1):
+            item = refined.items[idx]
+            refined_start = refined_starts[idx]
+            item.start = refined_start
+            duration = duration_hints[idx]
+
+            if refined_start is None:
+                item.end = None if duration is None else item.end
+                continue
+
+            end = refined_start if duration is None else float(refined_start + duration)
+            if next_known_start is not None:
+                end = min(end, float(next_known_start))
+            item.end = max(float(refined_start), float(end))
+            next_known_start = refined_start
+
+        refined.details["hybrid_refinement"] = {
+            "enabled": True,
+            "anchor_count": len(anchor_items),
+            "global_offset": float(global_offset),
+            "section_offsets": section_offsets,
+        }
+        return refined
