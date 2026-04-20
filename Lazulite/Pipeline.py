@@ -837,8 +837,22 @@ def process_audio_file(args: argparse.Namespace, audio_path: str | Path) -> None
             if args.align_mode == "auto":
                 alignment_result.details = dict(alignment_result.details)
                 alignment_result.details["fallback_from"] = "offset"
+            if lyric_has_real_timestamps:
+                alignment_result = aligner.refine_with_lyric_timestamps(
+                    lyric=lyric,
+                    alignment_result=alignment_result,
+                    transcription=track_result,
+                )
             print("歌词对齐:")
             print(f"  stats={alignment_result.stats}")
+            hybrid_details = (alignment_result.details or {}).get("hybrid_refinement") or {}
+            if hybrid_details.get("enabled"):
+                print("  hybrid_refinement=True")
+                print(f"  hybrid_anchor_count={hybrid_details.get('anchor_count')}")
+                print(f"  hybrid_global_offset={hybrid_details.get('global_offset')}")
+                section_offsets = hybrid_details.get("section_offsets") or {}
+                if section_offsets:
+                    print(f"  hybrid_section_offsets={section_offsets}")
 
         if track_result is None or alignment_result is None:
             raise RuntimeError("未能生成转写或对齐结果")

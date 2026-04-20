@@ -8,6 +8,7 @@ RE_LYRICS = re.compile(r'^\[(\d{2,}:\d{2}\.\d{2,3})\](.*)$')
 # 匹配日文歌词中常见的汉字(假名)注音，用于规范化时去掉括号内读音
 RE_FURIGANA = re.compile(r'([\u3400-\u4dbf\u4e00-\u9fff々〆ヵヶ]+)\(([\u3040-\u30ffー・ ]+)\)')
 RE_METADATA_SEP = re.compile(r'\s*[:：|｜]\s*')
+RE_LYRIC_QUOTES = re.compile(r'[「」『』【】〈〉《》〔〕〘〙〚〛“”‘’"]+')
 
 # 行首歌手/角色标记的几种常见形式
 RE_SINGER_COLON = re.compile(r'^(?P<label>[^\s:：|｜]{1,24})\s*[:：|｜]\s*(?P<body>.+)$')
@@ -254,6 +255,7 @@ class LyricLineStamp:
         """
         text = cls.normalize_plain_text(text)
         text = RE_FURIGANA.sub(r'\1', text)
+        text = RE_LYRIC_QUOTES.sub(' ', text)
         text = re.sub(r'[·•♪♬♫]+', ' ', text)
         text = re.sub(r'[，。！？、,.!?;；:：~～…]+', ' ', text)
         text = RE_SPACES.sub(' ', text).strip()
