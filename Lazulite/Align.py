@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 import numpy as np
@@ -145,6 +146,15 @@ class LyricAlignmentResult:
             "details": self.details,
             "items": [item.to_dict() for item in self.items],
         }
+
+
+@dataclass
+class _HybridOffsetAnchor:
+    line_index: int
+    merged_section_index: int | None
+    delta: float
+    score: float
+    chunk_confidence: float | None
 
 
 class LyricAligner:
@@ -916,15 +926,18 @@ class LyricAligner:
         if not getattr(lyric, "has_real_timestamps", True):
             return alignment_result
 
+        from Lazulite.OffsetAlign import OffsetAligner
+
         _, chunk_list = self._coerce_chunks(transcription)
+        offset_helper = OffsetAligner()
+        section_to_merged, merged_sections = offset_helper._merge_sections(chunk_list)
         chunk_section_by_segment = {
             int(chunk.segment_index): chunk.section_index
             for chunk in chunk_list
         }
 
         anchor_items = []
-        section_offsets_raw: dict[int, list[tuple[float, float]]] = {}
-        weighted_offsets: list[tuple[float, float]] = []
+        offset_candidates: list[_HybridOffsetAnchor] = []
 
         for item in alignment_result.items:
             if item.start is None or item.line.timestamp is None:
@@ -933,30 +946,63 @@ class LyricAligner:
             if reliability < 0.24:
                 continue
             offset = float(item.start - item.line.timestamp)
-            weighted_offsets.append((offset, reliability))
             section_index = self._infer_item_section_index(item, chunk_section_by_segment)
-            if section_index is not None:
-                section_offsets_raw.setdefault(section_index, []).append((offset, reliability))
+            merged_section_index = section_to_merged.get(section_index)
+            offset_candidates.append(
+                _HybridOffsetAnchor(
+                    line_index=item.line_index,
+                    merged_section_index=merged_section_index,
+                    delta=offset,
+                    score=reliability,
+                    chunk_confidence=item.confidence,
+                )
+            )
             anchor_items.append(
                 {
                     "line_index": item.line_index,
                     "offset": offset,
                     "reliability": reliability,
                     "section_index": section_index,
+                    "merged_section_index": merged_section_index,
                 }
             )
 
-        global_offset = self._weighted_median(weighted_offsets)
-        if global_offset is None:
+        global_cluster = offset_helper._largest_consistent_cluster(offset_candidates)
+        section_estimates, reliable_anchors = offset_helper._estimate_section_offsets(global_cluster, merged_sections)
+        is_reliable = bool(section_estimates) and len(reliable_anchors) >= offset_helper.min_anchor_count
+
+        if not is_reliable and len(global_cluster) >= offset_helper.min_anchor_count:
+            deltas = [item.delta for item in global_cluster]
+            global_offset = offset_helper._median(deltas)
+            mad = offset_helper._median([abs(delta - global_offset) for delta in deltas])
+            if mad <= offset_helper.max_section_mad:
+                line_indices = sorted(item.line_index for item in global_cluster)
+                section_estimates = [{
+                    "section_index": "hybrid_forced_global",
+                    "source_section_indices": [item["merged_section_index"] for item in merged_sections],
+                    "offset": global_offset,
+                    "anchor_count": len(global_cluster),
+                    "mad": mad,
+                    "line_start": line_indices[0],
+                    "line_end": line_indices[-1],
+                    "confidence": offset_helper._mean([item.chunk_confidence for item in global_cluster]),
+                }]
+                reliable_anchors = global_cluster
+                is_reliable = True
+
+        if not is_reliable:
             return alignment_result
 
-        section_offsets: dict[int, float] = {}
-        for section_index, values in section_offsets_raw.items():
-            if len(values) < 2:
-                continue
-            offset = self._weighted_median(values)
-            if offset is not None:
-                section_offsets[int(section_index)] = float(offset)
+        line_offsets = offset_helper._assign_line_offsets(len(alignment_result.items), section_estimates)
+        if not line_offsets or all(offset is None for offset in line_offsets):
+            return alignment_result
+
+        global_offset = float(section_estimates[0]["offset"])
+        section_offsets = {
+            str(section.get("section_index")): float(section["offset"])
+            for section in section_estimates
+            if section.get("offset") is not None
+        }
 
         refined = LyricAlignmentResult(
             music_path=alignment_result.music_path,
@@ -993,10 +1039,11 @@ class LyricAligner:
                 refined_starts.append(None if item.start is None else float(item.start))
                 continue
 
-            section_index = self._infer_item_section_index(item, chunk_section_by_segment)
-            offset = section_offsets.get(section_index, global_offset)
-            prior = max(0.0, float(item.line.timestamp + float(offset)))
-
+            line_offset = line_offsets[item.line_index]
+            if line_offset is None:
+                refined_starts.append(None if item.start is None else float(item.start))
+                continue
+            prior = max(0.0, float(item.line.timestamp + float(line_offset)))
             refined_starts.append(prior)
 
         refined_starts = self._smooth_monotonic_timestamps(refined_starts)
@@ -1022,6 +1069,8 @@ class LyricAligner:
             "enabled": True,
             "anchor_count": len(anchor_items),
             "global_offset": float(global_offset),
+            "merged_sections": merged_sections,
+            "sections": section_estimates,
             "section_offsets": section_offsets,
         }
         return refined

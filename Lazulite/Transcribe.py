@@ -1112,6 +1112,8 @@ class WhisperTranscriber:
         audio_16k = self.prepare_audio(segment_data["audio"], input_sr=sr)
         effective_prompt_text = prompt_text
         prompt_disabled_for_timestamps = False
+        
+        # Whisper 的 token 级时间戳和预输入 prompt 不兼容
         if self.enable_token_timestamps and self.disable_prompt_for_token_timestamps and prompt_text:
             effective_prompt_text = ""
             prompt_disabled_for_timestamps = True
