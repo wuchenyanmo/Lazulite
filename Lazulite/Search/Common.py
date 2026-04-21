@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass
 
 from fuzzywuzzy import fuzz
+from opencc import OpenCC
 from Lazulite.TextNormalize import (
-    RE_DASH_VARIANTS,
     RE_SPACES,
     SEARCH_SPECIAL_CHAR_REPLACEMENTS,
     normalize_text,
@@ -13,6 +13,7 @@ from Lazulite.TextNormalize import (
 
 RE_SEARCH_BRACKETS = re.compile(r"[\(\[（【].*?[\)\]）】]")
 RE_SEARCH_PUNCT = re.compile(r"[^0-9A-Za-z\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\s'-]+")
+_OPENCC_T2S = OpenCC("t2s")
 
 
 @dataclass(slots=True)
@@ -27,6 +28,14 @@ def combined_fuzzy_score(str1: str, str2: str, full_match_weight: float = 0.4) -
     partial = fuzz.partial_ratio(str1, str2)
     full = fuzz.ratio(str1, str2)
     return float(partial * (1 - full_match_weight) + full * full_match_weight)
+
+
+def normalize_score_text(text: str | None) -> str:
+    value = normalize_search_text(text)
+    if not value:
+        return ""
+    value = _OPENCC_T2S.convert(value)
+    return RE_SPACES.sub(" ", value).strip()
 
 
 def score_search_candidate(
@@ -50,10 +59,17 @@ def score_search_candidate(
     if abs(float(candidate_duration) - duration) > duration_threshold:
         return 0.0
 
+    score_title = normalize_score_text(title)
+    score_artist = normalize_score_text(artist)
+    score_album = normalize_score_text(album)
+    title_candidates = [value for value in (normalize_score_text(item) for item in fields.title_candidates) if value]
+    artist_candidates = [value for value in (normalize_score_text(item) for item in fields.artist_candidates) if value]
+    album_candidates = [value for value in (normalize_score_text(item) for item in fields.album_candidates) if value]
+
     score = {
         "name": (
-            max(combined_fuzzy_score(title, item, full_match_weight=name_full_match_weight) for item in fields.title_candidates)
-            if fields.title_candidates else 0.0
+            max(combined_fuzzy_score(score_title, item, full_match_weight=name_full_match_weight) for item in title_candidates)
+            if title_candidates and score_title else 0.0
         ),
     }
 
@@ -62,8 +78,8 @@ def score_search_candidate(
         score["artist"] = 0.0
     else:
         score["artist"] = (
-            max(combined_fuzzy_score(artist, item, full_match_weight=artist_full_match_weight) for item in fields.artist_candidates)
-            if fields.artist_candidates else 0.0
+            max(combined_fuzzy_score(score_artist, item, full_match_weight=artist_full_match_weight) for item in artist_candidates)
+            if artist_candidates and score_artist else 0.0
         )
 
     if album is None:
@@ -71,8 +87,8 @@ def score_search_candidate(
         score["album"] = 0.0
     else:
         score["album"] = (
-            max(combined_fuzzy_score(album, item, full_match_weight=album_full_match_weight) for item in fields.album_candidates)
-            if fields.album_candidates else 0.0
+            max(combined_fuzzy_score(score_album, item, full_match_weight=album_full_match_weight) for item in album_candidates)
+            if album_candidates and score_album else 0.0
         )
 
     total_weight = name_weight + artist_weight + album_weight
