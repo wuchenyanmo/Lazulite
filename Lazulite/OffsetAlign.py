@@ -260,6 +260,117 @@ class OffsetAligner:
                 )
         return candidates
 
+    def _build_dp_guided_anchor_candidates(
+        self,
+        lyric: LyricLineStamp,
+        transcription: WhisperTrackResult | dict,
+        chunks: list[WhisperChunkResult],
+        section_to_merged: dict[int | None, int | None],
+    ) -> tuple[list[OffsetAnchor], LyricAlignmentResult]:
+        text_aligner = LyricAligner()
+        dp_alignment = text_aligner.align(lyric=lyric, transcription=transcription)
+        chunk_by_segment = {
+            int(chunk.segment_index): chunk
+            for chunk in chunks
+        }
+
+        candidates: list[OffsetAnchor] = []
+        for item in dp_alignment.items:
+            if item.line.timestamp is None or not item.chunk_indices:
+                continue
+            if len(item.chunk_indices) != 1:
+                continue
+            chunk = chunk_by_segment.get(int(item.chunk_indices[0]))
+            if chunk is None or not self._chunk_is_eligible(chunk):
+                continue
+
+            lyric_text = self._line_match_text(item.line)
+            chunk_text = LyricLineStamp.normalize_lyric_text(item.chunk_text or chunk.text)
+            if not lyric_text or not chunk_text:
+                continue
+
+            length_ratio = len(chunk_text) / max(len(lyric_text), 1)
+            if length_ratio < self.min_length_ratio or length_ratio > self.max_length_ratio:
+                continue
+
+            full_similarity = text_aligner.text_similarity(lyric_text=lyric_text, chunk_text=chunk_text)
+            prefix_similarity = self._prefix_similarity(lyric_text, chunk_text, self.prefix_chars)
+            if prefix_similarity < self.min_prefix_similarity or full_similarity < self.min_full_similarity:
+                continue
+
+            anchor_time = self._anchor_time(chunk)
+            score = 1.30 * prefix_similarity + 1.00 * full_similarity
+            candidates.append(
+                OffsetAnchor(
+                    line_index=item.line_index,
+                    segment_index=chunk.segment_index,
+                    section_index=chunk.section_index,
+                    merged_section_index=section_to_merged.get(chunk.section_index),
+                    anchor_time=anchor_time,
+                    lyric_timestamp=float(item.line.timestamp),
+                    delta=float(anchor_time - item.line.timestamp),
+                    prefix_similarity=prefix_similarity,
+                    full_similarity=full_similarity,
+                    chunk_confidence=chunk.avg_confidence,
+                    score=score,
+                    chunk_text=item.chunk_text or chunk.text,
+                )
+            )
+        return candidates, dp_alignment
+
+    @staticmethod
+    def _assign_line_offsets_from_dp_sections(
+        line_count: int,
+        items: list[AlignedLyricLine],
+        section_offsets: dict[int | None, float],
+        section_to_merged: dict[int | None, int | None],
+        chunk_section_by_segment: dict[int, int | None],
+    ) -> list[float | None]:
+        line_offsets: list[float | None] = [None] * line_count
+        section_by_line: list[int | None] = [None] * line_count
+
+        for item in items:
+            if item.line_index < 0 or item.line_index >= line_count:
+                continue
+            section_indices = [
+                chunk_section_by_segment.get(segment_index)
+                for segment_index in item.chunk_indices
+                if chunk_section_by_segment.get(segment_index) is not None
+            ]
+            if not section_indices:
+                continue
+            counts: dict[int, int] = {}
+            for section_index in section_indices:
+                counts[int(section_index)] = counts.get(int(section_index), 0) + 1
+            dominant_section = max(counts.items(), key=lambda pair: pair[1])[0]
+            merged_section_index = section_to_merged.get(dominant_section)
+            if merged_section_index not in section_offsets:
+                continue
+            section_by_line[item.line_index] = merged_section_index
+            line_offsets[item.line_index] = float(section_offsets[merged_section_index])
+
+        next_known_section = None
+        for idx in range(line_count - 1, -1, -1):
+            current = section_by_line[idx]
+            if current is not None:
+                next_known_section = current
+                continue
+            if next_known_section is not None:
+                section_by_line[idx] = next_known_section
+                line_offsets[idx] = float(section_offsets[next_known_section])
+
+        previous_section = None
+        for idx in range(line_count):
+            current = section_by_line[idx]
+            if current is not None:
+                previous_section = current
+                continue
+            if previous_section is not None:
+                section_by_line[idx] = previous_section
+                line_offsets[idx] = float(section_offsets[previous_section])
+
+        return line_offsets
+
     def _select_monotonic_anchors(self, candidates: list[OffsetAnchor]) -> list[OffsetAnchor]:
         if not candidates:
             return []
@@ -450,9 +561,16 @@ class OffsetAligner:
             chunks=chunks,
             section_to_merged=section_to_merged,
         )
+        dp_guided_candidates, dp_alignment = self._build_dp_guided_anchor_candidates(
+            lyric=lyric,
+            transcription=transcription,
+            chunks=chunks,
+            section_to_merged=section_to_merged,
+        )
         anchors = self._select_monotonic_anchors(candidates)
         global_cluster = self._largest_consistent_cluster(anchors)
-        section_estimates, reliable_anchors = self._estimate_section_offsets(candidates, merged_sections)
+        section_seed_candidates = dp_guided_candidates if dp_guided_candidates else candidates
+        section_estimates, reliable_anchors = self._estimate_section_offsets(section_seed_candidates, merged_sections)
 
         is_reliable = bool(section_estimates) and len(reliable_anchors) >= self.min_anchor_count
         if not is_reliable and len(global_cluster) >= self.min_anchor_count:
@@ -476,6 +594,7 @@ class OffsetAligner:
         details = {
             "is_reliable": is_reliable,
             "candidate_count": len(candidates),
+            "dp_guided_candidate_count": len(dp_guided_candidates),
             "anchor_count": len(anchors),
             "cluster_anchor_count": len(global_cluster),
             "reliable_anchor_count": len(reliable_anchors),
@@ -524,7 +643,27 @@ class OffsetAligner:
                     details=details,
                 )
 
-        line_offsets = self._assign_line_offsets(len(lyric_lines), section_estimates) if is_reliable else [None] * len(lyric_lines)
+        if is_reliable:
+            section_offsets_by_merged = {
+                section.get("section_index"): float(section["offset"])
+                for section in section_estimates
+                if section.get("offset") is not None
+            }
+            chunk_section_by_segment = {
+                int(chunk.segment_index): chunk.section_index
+                for chunk in chunks
+            }
+            line_offsets = self._assign_line_offsets_from_dp_sections(
+                line_count=len(lyric_lines),
+                items=dp_alignment.items,
+                section_offsets=section_offsets_by_merged,
+                section_to_merged=section_to_merged,
+                chunk_section_by_segment=chunk_section_by_segment,
+            )
+            if not line_offsets or all(offset is None for offset in line_offsets):
+                line_offsets = self._assign_line_offsets(len(lyric_lines), section_estimates)
+        else:
+            line_offsets = [None] * len(lyric_lines)
         items = self._build_items_from_line_offsets(lyric_lines, line_offsets, reliable_anchors)
         return LyricAlignmentResult(
             music_path=music_path,
