@@ -303,16 +303,18 @@ class OffsetAligner:
                     best = window
         return best
 
-    def _estimate_section_offsets(self, anchors: list[OffsetAnchor], merged_sections: list[dict]) -> tuple[list[dict], list[OffsetAnchor]]:
-        by_section: dict[int | None, list[OffsetAnchor]] = {}
+    def _estimate_section_offsets(self, anchors: list, merged_sections: list[dict]) -> tuple[list[dict], list]:
+        by_section: dict[int | None, list] = {}
         for anchor in anchors:
             by_section.setdefault(anchor.merged_section_index, []).append(anchor)
 
         merged_lookup = {item["merged_section_index"]: item for item in merged_sections}
 
         section_estimates = []
-        reliable_anchors: list[OffsetAnchor] = []
+        reliable_anchors: list = []
         for section_index, section_anchors in sorted(by_section.items(), key=lambda item: (-1 if item[0] is None else item[0])):
+            if section_anchors and hasattr(section_anchors[0], "segment_index"):
+                section_anchors = self._select_monotonic_anchors(section_anchors)
             cluster = self._largest_consistent_cluster(section_anchors)
             if len(cluster) < self.min_section_anchor_count:
                 continue
@@ -450,7 +452,7 @@ class OffsetAligner:
         )
         anchors = self._select_monotonic_anchors(candidates)
         global_cluster = self._largest_consistent_cluster(anchors)
-        section_estimates, reliable_anchors = self._estimate_section_offsets(global_cluster, merged_sections)
+        section_estimates, reliable_anchors = self._estimate_section_offsets(candidates, merged_sections)
 
         is_reliable = bool(section_estimates) and len(reliable_anchors) >= self.min_anchor_count
         if not is_reliable and len(global_cluster) >= self.min_anchor_count:

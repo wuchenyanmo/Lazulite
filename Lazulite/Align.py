@@ -968,7 +968,7 @@ class LyricAligner:
             )
 
         global_cluster = offset_helper._largest_consistent_cluster(offset_candidates)
-        section_estimates, reliable_anchors = offset_helper._estimate_section_offsets(global_cluster, merged_sections)
+        section_estimates, reliable_anchors = offset_helper._estimate_section_offsets(offset_candidates, merged_sections)
         is_reliable = bool(section_estimates) and len(reliable_anchors) >= offset_helper.min_anchor_count
 
         if not is_reliable and len(global_cluster) >= offset_helper.min_anchor_count:
