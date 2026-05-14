@@ -414,6 +414,7 @@ def select_lyric_from_candidate_pool(
 
     ranked_items.sort(
         key=lambda value: (
+            -int(bool(value[1].get("has_real_timestamps"))),
             -int(value[1]["provider_priority"]),
             -float(value[0]),
             int(value[1]["provider_rank"]),
