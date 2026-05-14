@@ -412,6 +412,59 @@ class LyricAligner:
             previous = value
         return result
 
+    @staticmethod
+    def _assign_line_offsets_from_dp_sections(
+        line_count: int,
+        items: list[AlignedLyricLine],
+        section_offsets: dict[int | None, float],
+        chunk_section_by_segment: dict[int, int | None],
+        section_to_merged: dict[int | None, int | None],
+    ) -> list[float | None]:
+        line_offsets: list[float | None] = [None] * line_count
+        section_by_line: list[int | None] = [None] * line_count
+
+        for item in items:
+            if item.line_index < 0 or item.line_index >= line_count:
+                continue
+            section_indices = [
+                chunk_section_by_segment.get(segment_index)
+                for segment_index in item.chunk_indices
+                if chunk_section_by_segment.get(segment_index) is not None
+            ]
+            if not section_indices:
+                continue
+            counts: dict[int, int] = {}
+            for section_index in section_indices:
+                counts[int(section_index)] = counts.get(int(section_index), 0) + 1
+            dominant_section = max(counts.items(), key=lambda pair: pair[1])[0]
+            merged_section_index = section_to_merged.get(dominant_section)
+            if merged_section_index not in section_offsets:
+                continue
+            section_by_line[item.line_index] = merged_section_index
+            line_offsets[item.line_index] = float(section_offsets[merged_section_index])
+
+        next_known_section = None
+        for idx in range(line_count - 1, -1, -1):
+            current = section_by_line[idx]
+            if current is not None:
+                next_known_section = current
+                continue
+            if next_known_section is not None:
+                section_by_line[idx] = next_known_section
+                line_offsets[idx] = float(section_offsets[next_known_section])
+
+        previous_section = None
+        for idx in range(line_count):
+            current = section_by_line[idx]
+            if current is not None:
+                previous_section = current
+                continue
+            if previous_section is not None:
+                section_by_line[idx] = previous_section
+                line_offsets[idx] = float(section_offsets[previous_section])
+
+        return line_offsets
+
     def _flatten_chunk_token_entries(self, chunks: list[WhisperChunkResult]) -> list[dict]:
         """
         将若干 chunk 的 token 时间戳展开成带绝对时间的统一序列。
@@ -993,7 +1046,20 @@ class LyricAligner:
         if not is_reliable:
             return alignment_result
 
-        line_offsets = offset_helper._assign_line_offsets(len(alignment_result.items), section_estimates)
+        section_offsets_by_merged = {
+            section.get("section_index"): float(section["offset"])
+            for section in section_estimates
+            if section.get("offset") is not None
+        }
+        line_offsets = self._assign_line_offsets_from_dp_sections(
+            line_count=len(alignment_result.items),
+            items=alignment_result.items,
+            section_offsets=section_offsets_by_merged,
+            chunk_section_by_segment=chunk_section_by_segment,
+            section_to_merged=section_to_merged,
+        )
+        if not line_offsets or all(offset is None for offset in line_offsets):
+            line_offsets = offset_helper._assign_line_offsets(len(alignment_result.items), section_estimates)
         if not line_offsets or all(offset is None for offset in line_offsets):
             return alignment_result
 
