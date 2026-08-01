@@ -20,8 +20,9 @@ QQ_HEADERS = {
     ),
     "Referer": "https://y.qq.com/",
 }
-QQ_SEARCH_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
+QQ_SEARCH_API = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
 QQ_LYRIC_API = "https://i.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+QQ_MUSICU_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
 SEARCH_LIMIT = 20
 
 
@@ -30,12 +31,18 @@ def _song_artists(result: dict) -> list[dict]:
 
 
 def _song_album(result: dict) -> dict:
-    return dict(result.get("album") or {})
+    album = result.get("album")
+    if isinstance(album, dict):
+        return dict(album)
+    return {
+        "name": result.get("albumname"),
+        "mid": result.get("albummid"),
+    }
 
 
 def _song_aliases(result: dict) -> list[str]:
     aliases: list[str] = []
-    for key in ("subtitle", "title"):
+    for key in ("subtitle", "title", "songname"):
         value = clean_text(result.get(key))
         if value:
             aliases.append(value)
@@ -51,7 +58,11 @@ def build_qq_score_fields(result: dict) -> SearchScoreFields:
     result_artists = [parse_qq_artist_dict(item) for item in _song_artists(result)]
     return SearchScoreFields(
         duration=float(result.get("interval") or 0.0),
-        title_candidates=unique_non_empty_texts([result.get("name"), *_song_aliases(result)]),
+        title_candidates=unique_non_empty_texts([
+            result.get("name"),
+            result.get("songname"),
+            *_song_aliases(result),
+        ]),
         artist_candidates=unique_non_empty_texts(chain(*result_artists)),
         album_candidates=unique_non_empty_texts([
             album_info.get("name"),
@@ -102,6 +113,15 @@ def _parse_qq_lyric_text(lyric_text: str) -> LyricLineStamp | None:
     return LyricLineStamp.from_plain_text(normalized)
 
 
+def _is_successful_lyric_payload(payload: dict | None) -> bool:
+    if not payload or not payload.get("lyric"):
+        return False
+    retcode = payload.get("retcode")
+    if retcode is None:
+        retcode = payload.get("code", 0)
+    return int(retcode) == 0
+
+
 class QQMusicProvider(OnlineLyricProvider):
     source_name = "qqmusic"
     priority = 100
@@ -120,29 +140,31 @@ class QQMusicProvider(OnlineLyricProvider):
         score_title = score_title if score_title is not None else title
         score_artist = score_artist if score_artist is not None else artist
         score_album = score_album if score_album is not None else album
-        payload = {
-            "comm": {"ct": "19", "cv": "1859", "uin": "0"},
-            "req": {
-                "method": "DoSearchForQQMusicDesktop",
-                "module": "music.search.SearchCgiService",
-                "param": {
-                    "grp": 1,
-                    "num_per_page": max(1, int(limit)),
-                    "page_num": 1,
-                    "query": " ".join(part for part in [title, artist] if part),
-                    "search_type": 0,
-                },
-            },
+        params = {
+            "format": "json",
+            "outCharset": "utf-8",
+            "ct": 24,
+            "qqmusic_ver": 1298,
+            "remoteplace": "txt.yqq.song",
+            "t": 0,
+            "aggr": 1,
+            "cr": 1,
+            "lossless": 0,
+            "flag_qc": 0,
+            "platform": "yqq.json",
+            "w": " ".join(part for part in [title, artist] if part),
+            "p": 1,
+            "n": max(1, int(limit)),
         }
         try:
-            response = requests.post(QQ_SEARCH_API, json=payload, headers=QQ_HEADERS, timeout=(5, 7))
+            response = requests.get(QQ_SEARCH_API, params=params, headers=QQ_HEADERS, timeout=(5, 7))
             response.raise_for_status()
             data = response.json()
         except RequestException as exc:
             warnings.warn(f"QQ 音乐搜索请求失败，已跳过该来源: {exc}", RuntimeWarning)
             return []
 
-        songs = (((data.get("req") or {}).get("data") or {}).get("body") or {}).get("song", {}).get("list", [])
+        songs = ((data.get("data") or {}).get("song") or {}).get("list", [])
         candidates: list[SearchCandidate] = []
         for item in songs:
             artist_names = list(chain(*[parse_qq_artist_dict(artist_item) for artist_item in _song_artists(item)]))
@@ -151,8 +173,8 @@ class QQMusicProvider(OnlineLyricProvider):
             candidates.append(
                 SearchCandidate(
                     source=self.source_name,
-                    candidate_id=str(item.get("mid") or ""),
-                    title=str(item.get("name") or item.get("title") or "").strip(),
+                    candidate_id=str(item.get("mid") or item.get("songmid") or ""),
+                    title=str(item.get("name") or item.get("songname") or item.get("title") or "").strip(),
                     artist=" / ".join(artist_names) if artist_names else None,
                     album=str(album_info.get("name") or album_info.get("title") or "").strip() or None,
                     duration=score_fields.duration,
@@ -191,14 +213,14 @@ class QQMusicProvider(OnlineLyricProvider):
                 break
             except RequestException as exc:
                 last_error = exc
-        if payload is None:
-            warnings.warn(f"QQ 音乐歌词请求失败，已跳过该候选: {last_error}", RuntimeWarning)
-            return None
+        if not _is_successful_lyric_payload(payload):
+            payload, fallback_error = self._fetch_musicu_lyric(candidate)
+            if fallback_error is not None:
+                last_error = fallback_error
 
-        retcode = payload.get("retcode")
-        if retcode is None:
-            retcode = payload.get("code", -1)
-        if int(retcode) != 0:
+        if not _is_successful_lyric_payload(payload):
+            if last_error is not None:
+                warnings.warn(f"QQ 音乐歌词请求失败，已跳过该候选: {last_error}", RuntimeWarning)
             return None
 
         lyric_text = _decode_qq_lyric_text(payload.get("lyric"))
@@ -212,6 +234,51 @@ class QQMusicProvider(OnlineLyricProvider):
         if translation_text:
             lyric.load_translation(translation_text)
         return lyric
+
+    def _fetch_musicu_lyric(
+        self,
+        candidate: SearchCandidate,
+    ) -> tuple[dict | None, RequestException | None]:
+        song_id = candidate.raw.get("id") or candidate.raw.get("songid") or 0
+        request_payload = {
+            "req_0": {
+                "module": "music.musichallSong.PlayLyricInfo",
+                "method": "GetPlayLyricInfo",
+                "param": {
+                    "songMID": candidate.candidate_id,
+                    "songID": int(song_id or 0),
+                    "trans_t": 0,
+                    "roma_t": 0,
+                    "qrc_t": 0,
+                    "crypt": 0,
+                    "lrc_t": 0,
+                    "interval": 0,
+                },
+            },
+            "loginUin": "0",
+            "comm": {"uin": "0", "format": "json", "ct": 24, "cv": 0},
+        }
+        headers = {
+            **QQ_HEADERS,
+            "Referer": "https://y.qq.com/portal/player.html",
+            "Origin": "https://y.qq.com",
+        }
+        try:
+            response = requests.post(
+                QQ_MUSICU_API,
+                json=request_payload,
+                headers=headers,
+                timeout=(5, 15),
+            )
+            response.raise_for_status()
+            response_payload = response.json()
+        except RequestException as exc:
+            return None, exc
+
+        lyric_response = response_payload.get("req_0") or {}
+        if int(response_payload.get("code", -1)) != 0 or int(lyric_response.get("code", -1)) != 0:
+            return None, None
+        return lyric_response.get("data") or None, None
 
     def fetch_lyric_by_song_mid(self, song_mid: str) -> LyricLineStamp | None:
         candidate = SearchCandidate(

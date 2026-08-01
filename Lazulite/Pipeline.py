@@ -432,6 +432,11 @@ def _format_lrc_timestamp(seconds: float) -> str:
     return f"[{minute:02d}:{second:05.2f}]"
 
 
+def _build_no_vocal_lrc(text: str) -> str:
+    lyric_text = " ".join(str(text or "").split())
+    return f"[00:00:00]{lyric_text}" if lyric_text else ""
+
+
 def _format_lyric_line_text(line: LyricTokenLine, include_translation: bool, translation_brackets: str) -> str:
     text = line.text
     if line.singer:
@@ -749,6 +754,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-search-score", type=float, default=55.0, help="歌词搜索最低接受分数")
     parser.add_argument("--min-lyric-lines", type=int, default=3, help="在线歌词最少有效行数；小于等于该值会视为空歌词")
     parser.add_argument("--search-workers", type=int, default=4, help="在线歌词 provider 搜索并发数")
+    parser.add_argument(
+        "--no-vocal-lyric-text",
+        help="检测为纯音乐无人声时，将该文本以 [00:00:00] 时间戳写入音频内嵌歌词标签",
+    )
     parser.add_argument("--output-lrc", help="将最终对齐歌词额外保存为 .lrc 文件")
     parser.add_argument("--transcription-json", help="将分片转写结果额外保存为 JSON")
     parser.add_argument("--alignment-json", help="将对齐结果额外保存为 JSON")
@@ -888,7 +897,13 @@ def process_audio_file(args: argparse.Namespace, audio_path: str | Path) -> None
 
         if not analysis_result.is_vocal:
             print("警告:")
-            print("  当前音频未检测到明显人声，已跳过转写、对齐、歌词写回与歌词文件输出")
+            print("  当前音频未检测到明显人声，已跳过转写、对齐与常规歌词输出")
+            no_vocal_lrc = _build_no_vocal_lrc(args.no_vocal_lyric_text or "")
+            if no_vocal_lrc:
+                write_lyric_metadata(audio_path, no_vocal_lrc)
+                print("纯音乐歌词写回:")
+                print(f"  lyric={no_vocal_lrc}")
+                print(f"  path={audio_path}")
             return
 
         analyzer.release_model_if_needed()
