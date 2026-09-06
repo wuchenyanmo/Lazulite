@@ -15,14 +15,41 @@ python tools/benchmark.py \
 
 `dp` 会清除全部 TTML 人工时间，防止真值泄漏。`offset`、`hybrid` 与 `auto` 则在每个真值端点减去 `--source-shift`（默认 4 秒），构造可验证偏移恢复能力的受控输入。逐行结果和原始 JSON 应与提交一同保存，避免只保留汇总数字。Qwen 没有 token 时间，DP 结果使用声学窗口，因此该 benchmark 不能解释为逐字 forced-alignment 准确率。
 
-## 2026-09-06 重构基线
+## 2026-09-06 重构验收基线
 
-运行：Qwen/Qwen3-ASR-0.6B（`5eb144179a02acc5e5ba31e748d22b0cf3e303b0`）、qwen-asr 0.0.6、Torch 2.14.0+cu130、Python 3.12.3、RTX 4090 49140 MiB、Demucs `htdemucs`、DP 模式。三首均从整曲解码、分离和声学分段开始；没有将 TTML 时间输入 DP。
+环境为 Python 3.12.3、qwen-asr 0.0.6、Transformers 4.57.6、Torch 2.14.0+cu130、RTX 4090（49140 MiB）与 Demucs `htdemucs`。分离器实际参数是 `device=cuda`、`split=true`、`overlap=0.25`。三首均从整曲解码、分离和声学分段开始。
 
-| 素材 | 用时 | RTF | 覆盖率 | 未解决行 | 端点 MAE | P90 | ≤0.25s / ≤0.50s |
+模型权重身份已在本机核验：Qwen 0.6B 为提交 `5eb144179a02acc5e5ba31e748d22b0cf3e303b0`，`model.safetensors` SHA-256 为 `79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea`；Qwen 1.7B 两个分片的 SHA-256 分别为 `a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6` 和 `6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc`；Whisper large-v3 `model.safetensors` SHA-256 为 `a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95`。
+
+### DP：不泄漏 TTML 时间
+
+三组原始逐行记录： [Qwen 0.6B](benchmarks/qwen-0.6b-dp-2026-09-06.json)、[Qwen 1.7B](benchmarks/qwen-1.7b-dp-2026-09-06.json)、[Whisper large-v3](benchmarks/whisper-large-v3-dp-2026-09-06.json)。
+
+| 后端 / 素材 | 总用时 | RTF | 覆盖率 / 未解决行 | start MAE | end MAE | 热转写 | allocated / reserved 峰值 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| POWDER SNOW (Live Ver.) | 46.119s | 0.1028 | 100.00% | 0 | 1.532s | 2.681s | 30.00% / 40.00% |
-| 夜奏花 | 25.227s | 0.0715 | 96.97% | 1 | 5.694s | 19.115s | 39.06% / 45.31% |
-| 鳥の詩 | 38.284s | 0.1037 | 100.00% | 0 | 1.407s | 4.140s | 33.33% / 57.14% |
+| Qwen 0.6B / POWDER SNOW | 35.369s | 0.0788 | 100.00% / 0 | 0.560s | 2.470s | 25.526s | 3178 / 3862 MiB |
+| Qwen 0.6B / 夜奏花 | 25.795s | 0.0731 | 93.94% / 2 | 5.261s | 4.415s | 17.336s | 2855 / 3862 MiB |
+| Qwen 0.6B / 鳥の詩 | 38.402s | 0.1041 | 100.00% / 0 | 0.405s | 2.005s | 29.390s | 2909 / 3862 MiB |
+| Qwen 1.7B / POWDER SNOW | 52.942s | 0.1180 | 100.00% / 0 | 3.315s | 5.123s | 28.790s | 5573 / 6282 MiB |
+| Qwen 1.7B / 夜奏花 | 26.542s | 0.0752 | 100.00% / 0 | 15.397s | 13.700s | 21.959s | 5251 / 6282 MiB |
+| Qwen 1.7B / 鳥の詩 | 51.162s | 0.1386 | 97.62% / 1 | 5.240s | 7.415s | 35.623s | 5305 / 6286 MiB |
+| Whisper large-v3 / POWDER SNOW | 220.740s | 0.4919 | 100.00% / 0 | 0.669s | 3.215s | 210.187s | 6677 / 7314 MiB |
+| Whisper large-v3 / 夜奏花 | 127.522s | 0.3612 | 93.94% / 2 | 4.919s | 5.089s | 114.104s | 6374 / 7314 MiB |
+| Whisper large-v3 / 鳥の詩 | 212.926s | 0.5769 | 97.62% / 1 | 1.141s | 2.920s | 204.952s | 6419 / 7314 MiB |
 
-这里的覆盖率是具有开始和结束候选的行数占比；端点指标只对具有可比较端点的结果统计。Qwen 路径没有 token 时间，因而这些是声学 core/插值的自动行级基线，尤其不应解读为逐字、mora 或 forced-alignment 精度。夜奏花的长尾误差也说明当前结果只能作为后续算法变更的比较基线，不能设置未经验证的绝对质量门槛。
+模型加载分别为 Qwen 0.6B 9.404s、Qwen 1.7B 10.395s、Whisper large-v3 7.395s。覆盖率是有完整开始、结束候选的行数占比；每种端点指标只统计具有该端点的行。Qwen 路径没有 token 时间，因而 DP 的声学 core/插值结果不是逐字、mora 或 forced-alignment 精度。
+
+### offset / hybrid：已知 4 秒偏移
+
+受控输入把每个 TTML 源端点统一提前 4 秒；测量指标仍相对原始 TTML 真值。原始逐行记录为 [offset](benchmarks/qwen-0.6b-offset-shift-4s-2026-09-06.json) 与 [hybrid](benchmarks/qwen-0.6b-hybrid-shift-4s-2026-09-06.json)，均使用 Qwen 0.6B。
+
+| 模式 / 素材 | 覆盖率 / 未解决行 | start MAE | end MAE | 行时间来源 |
+| --- | ---: | ---: | ---: | --- |
+| offset / POWDER SNOW | 100.00% / 0 | 0.139s | 0.139s | `source_offset` |
+| offset / 夜奏花 | 100.00% / 0 | 0.142s | 0.142s | `source_offset` |
+| offset / 鳥の詩 | 100.00% / 0 | 0.102s | 0.102s | `source_offset` |
+| hybrid / POWDER SNOW | 100.00% / 0 | 0.134s | 0.134s | `source_offset` |
+| hybrid / 夜奏花 | 100.00% / 0 | 0.146s | 0.146s | `source_offset` |
+| hybrid / 鳥の詩 | 100.00% / 0 | 0.108s | 0.108s | `source_offset` |
+
+两种模式都恢复了受控偏移，且没有未解决行。hybrid 的细化结果在本数据上由可靠 offset 锚点确定；其 DP 引导与不可靠 offset 的回退语义另有针对性单元测试覆盖。

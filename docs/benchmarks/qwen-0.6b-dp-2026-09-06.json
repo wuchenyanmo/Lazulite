@@ -1,0 +1,1918 @@
+{
+  "model_load_seconds": 9.404343316331506,
+  "mode": "dp",
+  "source_shift": null,
+  "records": [
+    {
+      "audio": "POWDER SNOW (Live Ver.).m4a",
+      "audio_source_id": "sha256:c40031ddd08b55303d046198606c3df0cbb102b1fdc1ddde55e30f27cfbdf97f",
+      "duration_seconds": 448.7253125,
+      "elapsed_seconds": 35.369070241227746,
+      "rtf": 0.07882120588244673,
+      "hot_transcription_seconds": 25.525573718361557,
+      "peak_cuda_allocated_bytes": 3332812800,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "dp",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 35,
+        "complete_coverage": 1.0,
+        "unresolved_lines": 0,
+        "start": {
+          "mae_seconds": 0.5604360220278563,
+          "p50_seconds": 0.20338321995464526,
+          "p90_seconds": 2.2572108843536967,
+          "within_0_25_seconds": 0.6571428571428571,
+          "within_0_50_seconds": 0.7428571428571429
+        },
+        "end": {
+          "mae_seconds": 2.4698725623582747,
+          "p50_seconds": 1.2792585034013655,
+          "p90_seconds": 4.120188208616753,
+          "within_0_25_seconds": 0.0,
+          "within_0_50_seconds": 0.0
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": 129.6734693877551,
+          "end": 133.38755102040815,
+          "similarity": 0.7692307692307693,
+          "score": 1.240377283411455,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L5",
+          "start": 135.22861678004534,
+          "end": 139.4709977324263,
+          "similarity": 0.9411764705882353,
+          "score": 1.4659009126672662,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-1",
+            "vocal-2"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L6",
+          "start": 141.16798185941042,
+          "end": 145.9066439909297,
+          "similarity": 0.9523809523809523,
+          "score": 1.4936579806112442,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-3",
+            "vocal-4"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L7",
+          "start": 146.43496598639456,
+          "end": 150.91748299319727,
+          "similarity": 0.7272727272727273,
+          "score": 1.129702537595912,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-5",
+            "vocal-6"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L8",
+          "start": 151.94208616780045,
+          "end": 156.28052154195012,
+          "similarity": 1.0,
+          "score": 1.5947122031298924,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-7"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L9",
+          "start": 157.59328798185942,
+          "end": 162.02777777777777,
+          "similarity": 0.9473684210526315,
+          "score": 1.4875232302566725,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-8",
+            "vocal-9"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L10",
+          "start": 163.46861678004535,
+          "end": 169.02374149659863,
+          "similarity": 0.6666666666666666,
+          "score": 1.0510352280050346,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-10",
+            "vocal-11"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L11",
+          "start": 170.1764172335601,
+          "end": 172.3056009070295,
+          "similarity": 0.5333333333333333,
+          "score": 0.8342607271502744,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-12",
+            "vocal-13"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L12",
+          "start": 176.06775510204082,
+          "end": 181.28668934240363,
+          "similarity": 0.72,
+          "score": 1.1218152942038968,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-15",
+            "vocal-16"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L13",
+          "start": 189.9796371882086,
+          "end": 194.3981179138322,
+          "similarity": 0.5454545454545454,
+          "score": 0.854738258670406,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-18",
+            "vocal-19"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L14",
+          "start": 201.15396825396826,
+          "end": 205.97267573696146,
+          "similarity": 0.9333333333333333,
+          "score": 1.5053810431839156,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-21"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L15",
+          "start": 206.42095238095237,
+          "end": 211.30369614512472,
+          "similarity": 0.9473684210526315,
+          "score": 1.479295814543332,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-22",
+            "vocal-23"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L16",
+          "start": 212.31229024943312,
+          "end": 219.77249433106576,
+          "similarity": 0.88,
+          "score": 1.3772375763721363,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-24",
+            "vocal-25"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L17",
+          "start": 220.3328344671202,
+          "end": 221.4694739229025,
+          "similarity": 0.8648648648648649,
+          "score": 1.3447754695706788,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-26"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L18",
+          "start": 221.4694739229025,
+          "end": 226.01603174603176,
+          "similarity": 0.8648648648648649,
+          "score": 1.3447754695706788,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-26"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L19",
+          "start": 251.07024943310657,
+          "end": 253.3755328798186,
+          "similarity": 0.6,
+          "score": 0.9824796047418166,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-27"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L20",
+          "start": 256.6574149659864,
+          "end": 260.49956916099774,
+          "similarity": 0.7368421052631579,
+          "score": 1.146557633768101,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-29",
+            "vocal-30"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L21",
+          "start": 262.5647619047619,
+          "end": 267.3514512471655,
+          "similarity": 0.9333333333333333,
+          "score": 1.4569030127185096,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-31",
+            "vocal-32"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L22",
+          "start": 267.79972789115646,
+          "end": 269.75281179138324,
+          "similarity": 0.42857142857142855,
+          "score": 0.667520313307781,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-33",
+            "vocal-34"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L23",
+          "start": 273.73909297052154,
+          "end": 276.02836734693875,
+          "similarity": 1.0,
+          "score": 1.6043116737777816,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-36"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L24",
+          "start": 278.12557823129254,
+          "end": 286.4982993197279,
+          "similarity": 0.75,
+          "score": 1.1640586688663879,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-39",
+            "vocal-40"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L25",
+          "start": 287.74702947845805,
+          "end": 297.1443310657596,
+          "similarity": 0.7,
+          "score": 1.099425982787073,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-41",
+            "vocal-42"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L26",
+          "start": 298.84131519274376,
+          "end": 303.7080498866213,
+          "similarity": 1.0,
+          "score": 1.6072491196729533,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-43"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L27",
+          "start": 304.0922902494331,
+          "end": 308.7989342403628,
+          "similarity": 0.7,
+          "score": 1.0900600127943691,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-44",
+            "vocal-45"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L28",
+          "start": 311.1522902494331,
+          "end": 317.34777777777776,
+          "similarity": 0.7407407407407407,
+          "score": 1.158412745313457,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-47",
+            "vocal-48"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L29",
+          "start": 317.95614512471656,
+          "end": 319.0990022675737,
+          "similarity": 0.4888888888888889,
+          "score": 0.709545344961864,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-49"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L30",
+          "start": 319.0990022675737,
+          "end": 323.6704308390023,
+          "similarity": 0.4888888888888889,
+          "score": 0.709545344961864,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-49"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L31",
+          "start": 323.6704308390023,
+          "end": 325.95614512471656,
+          "similarity": 0.4888888888888889,
+          "score": 0.709545344961864,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-49"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L32",
+          "start": 326.39292517006805,
+          "end": 331.227641723356,
+          "similarity": 0.9473684210526315,
+          "score": 1.4783988852763217,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-50",
+            "vocal-51"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L33",
+          "start": 332.30027210884356,
+          "end": 339.8565306122449,
+          "similarity": 0.75,
+          "score": 1.179117258543048,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-52",
+            "vocal-53"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L34",
+          "start": 340.3368253968254,
+          "end": 343.8908163265306,
+          "similarity": 0.6666666666666666,
+          "score": 1.0879099232610001,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-54"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L35",
+          "start": 344.5472108843537,
+          "end": 347.47684807256235,
+          "similarity": 0.7058823529411765,
+          "score": 1.1408142326958115,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-55"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L36",
+          "start": 348.0371882086168,
+          "end": 352.47167800453514,
+          "similarity": 0.75,
+          "score": 1.1630093052998445,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-56",
+            "vocal-57"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L37",
+          "start": 355.62548752834465,
+          "end": 364.14229024943313,
+          "similarity": 0.9166666666666666,
+          "score": 1.4294636454493501,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-59",
+            "vocal-60"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L38",
+          "start": 364.4304761904762,
+          "end": 373.2514512471655,
+          "similarity": 0.9411764705882353,
+          "score": 1.4740267703692864,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-61",
+            "vocal-62"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        }
+      ]
+    },
+    {
+      "audio": "夜奏花.m4a",
+      "audio_source_id": "sha256:998d82233c0221a4a1bce5818250f3ed799b28f5db9a2233ce0619cf8d67fb70",
+      "duration_seconds": 353.0026875,
+      "elapsed_seconds": 25.795357803814113,
+      "rtf": 0.07307411166328334,
+      "hot_transcription_seconds": 17.3364436943084,
+      "peak_cuda_allocated_bytes": 2994089472,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "dp",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 33,
+        "complete_coverage": 0.9393939393939394,
+        "unresolved_lines": 2,
+        "start": {
+          "mae_seconds": 5.261259394886989,
+          "p50_seconds": 0.18560090702948173,
+          "p90_seconds": 19.115170068027204,
+          "within_0_25_seconds": 0.5483870967741935,
+          "within_0_50_seconds": 0.6129032258064516
+        },
+        "end": {
+          "mae_seconds": 4.415245935739884,
+          "p50_seconds": 0.9773469387755256,
+          "p90_seconds": 13.779829931972792,
+          "within_0_25_seconds": 0.3548387096774194,
+          "within_0_50_seconds": 0.45161290322580644
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": null,
+          "end": null,
+          "similarity": 0.0,
+          "score": null,
+          "timing_source": "unresolved",
+          "source_segment_ids": [],
+          "issues": [
+            "low_text_match"
+          ]
+        },
+        {
+          "line_id": "L5",
+          "start": 41.911746031746034,
+          "end": 42.08884212018141,
+          "similarity": 0.20512820512820512,
+          "score": 0.20163857141368968,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L6",
+          "start": 42.08884212018141,
+          "end": 42.26593820861678,
+          "similarity": 0.20512820512820512,
+          "score": 0.20163857141368968,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L7",
+          "start": 42.26593820861678,
+          "end": 42.64964640022676,
+          "similarity": 0.20512820512820512,
+          "score": 0.20163857141368968,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L8",
+          "start": 42.64964640022676,
+          "end": 42.856258503401364,
+          "similarity": 0.20512820512820512,
+          "score": 0.20163857141368968,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L9",
+          "start": 65.6051700680272,
+          "end": 66.78982993197279,
+          "similarity": 0.10526315789473684,
+          "score": 0.16032817937837268,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-1"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L10",
+          "start": 66.78982993197279,
+          "end": 67.97448979591837,
+          "similarity": 0.10526315789473684,
+          "score": 0.16032817937837268,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-1"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L11",
+          "start": 68.45478458049887,
+          "end": 72.50505668934241,
+          "similarity": 0.631578947368421,
+          "score": 1.0193409162594305,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-2"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L12",
+          "start": 73.3055328798186,
+          "end": 78.9407029478458,
+          "similarity": 0.8571428571428571,
+          "score": 1.3385601391723876,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-3",
+            "vocal-4"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L13",
+          "start": 83.98358276643991,
+          "end": 90.91548752834467,
+          "similarity": 0.6363636363636364,
+          "score": 0.995193556255952,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-7",
+            "vocal-8"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L14",
+          "start": 91.94009070294784,
+          "end": 94.83770975056689,
+          "similarity": 0.2857142857142857,
+          "score": 0.43475883747394506,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-9",
+            "vocal-10"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L15",
+          "start": 114.16068027210885,
+          "end": 119.18750566893424,
+          "similarity": 0.5,
+          "score": 0.7707349763921212,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-11",
+            "vocal-12"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L16",
+          "start": 129.4653514739229,
+          "end": 133.2594784580499,
+          "similarity": 0.875,
+          "score": 1.3619529467875366,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-16",
+            "vocal-17"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L17",
+          "start": 134.50820861678005,
+          "end": 136.0610657596372,
+          "similarity": 0.15384615384615385,
+          "score": 0.23925492567777415,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-18",
+            "vocal-19"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L18",
+          "start": 142.25659863945577,
+          "end": 147.93979591836734,
+          "similarity": 0.9230769230769231,
+          "score": 1.4705938008438206,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-22"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L19",
+          "start": 151.23768707482992,
+          "end": 159.75448979591837,
+          "similarity": 0.9166666666666666,
+          "score": 1.4384710324875754,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-23",
+            "vocal-24"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L20",
+          "start": 160.37886621315192,
+          "end": 166.19013605442177,
+          "similarity": 0.6956521739130435,
+          "score": 1.0992203146476496,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-25",
+            "vocal-26"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L21",
+          "start": 166.68643990929706,
+          "end": 177.9728117913832,
+          "similarity": 0.72,
+          "score": 1.1333654021197475,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-27",
+            "vocal-28"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L22",
+          "start": 178.9814058956916,
+          "end": 181.36673469387756,
+          "similarity": 0.6666666666666666,
+          "score": 1.0715677596833197,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-29"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L23",
+          "start": 182.85560090702947,
+          "end": 183.88015873015874,
+          "similarity": 0.46153846153846156,
+          "score": 0.7502292057853066,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-30"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L24",
+          "start": 216.95492063492063,
+          "end": 220.79707482993197,
+          "similarity": 0.125,
+          "score": 0.24232970967810408,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-31"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L25",
+          "start": 221.3734240362812,
+          "end": 227.04061224489797,
+          "similarity": 0.6363636363636364,
+          "score": 0.9947892588204807,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-32",
+            "vocal-33"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L26",
+          "start": 227.24875283446713,
+          "end": 230.64265306122448,
+          "similarity": 0.7,
+          "score": 1.101144850421698,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-34",
+            "vocal-35"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L27",
+          "start": 232.4356916099773,
+          "end": 243.89816326530612,
+          "similarity": 1.0,
+          "score": 1.5711210404982585,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-36",
+            "vocal-37"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L28",
+          "start": 244.79469387755103,
+          "end": 247.5802494331066,
+          "similarity": 0.8888888888888888,
+          "score": 1.444008539220618,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-38"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L29",
+          "start": 247.9324716553288,
+          "end": 256.6093650793651,
+          "similarity": 0.8461538461538461,
+          "score": 1.3270616854059072,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-39",
+            "vocal-40"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L30",
+          "start": 257.1697052154195,
+          "end": 262.94895691609975,
+          "similarity": 0.8571428571428571,
+          "score": 1.3509477467515671,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-41",
+            "vocal-42"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L31",
+          "start": 263.4612698412698,
+          "end": 274.5715419501134,
+          "similarity": 0.20689655172413793,
+          "score": 0.3371338035089012,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-43",
+            "vocal-44"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L32",
+          "start": 275.80426303854875,
+          "end": 281.9517233560091,
+          "similarity": 0.6666666666666666,
+          "score": 1.0452296453312329,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-45",
+            "vocal-46"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L33",
+          "start": 292.00544217687076,
+          "end": 296.9202040816327,
+          "similarity": 1.0,
+          "score": 1.605804549179454,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-48"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L34",
+          "start": 299.8498866213152,
+          "end": 302.1231519274376,
+          "similarity": 0.6666666666666666,
+          "score": 1.0902841618597359,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-49"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L35",
+          "start": 302.66748299319727,
+          "end": 318.27630385487527,
+          "similarity": 0.5,
+          "score": 0.7794370853388514,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-50",
+            "vocal-51"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L36",
+          "start": null,
+          "end": null,
+          "similarity": 0.0,
+          "score": null,
+          "timing_source": "unresolved",
+          "source_segment_ids": [],
+          "issues": [
+            "low_text_match"
+          ]
+        }
+      ]
+    },
+    {
+      "audio": "鳥の詩.m4a",
+      "audio_source_id": "sha256:faf6075ef7ba583989ea00d4dde7999e8fd7d29135563fdac51d14d5d88f9157",
+      "duration_seconds": 369.0666875,
+      "elapsed_seconds": 38.40247535146773,
+      "rtf": 0.10405294395871946,
+      "hot_transcription_seconds": 29.39008630719036,
+      "peak_cuda_allocated_bytes": 3050692096,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "dp",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 42,
+        "complete_coverage": 1.0,
+        "unresolved_lines": 0,
+        "start": {
+          "mae_seconds": 0.4048149597349378,
+          "p50_seconds": 0.1359455782312864,
+          "p90_seconds": 0.8208503401360474,
+          "within_0_25_seconds": 0.7857142857142857,
+          "within_0_50_seconds": 0.8809523809523809
+        },
+        "end": {
+          "mae_seconds": 2.004954901425899,
+          "p50_seconds": 0.8891836734693896,
+          "p90_seconds": 4.139987946055626,
+          "within_0_25_seconds": 0.0,
+          "within_0_50_seconds": 0.42857142857142855
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": 15.576825396825397,
+          "end": 21.596213151927437,
+          "similarity": 0.8387096774193549,
+          "score": 1.3010140449063978,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-0",
+            "vocal-1"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L5",
+          "start": 23.325215419501134,
+          "end": 26.719115646258505,
+          "similarity": 0.08695652173913043,
+          "score": 0.14059675582013711,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-2",
+            "vocal-3"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L6",
+          "start": 27.6156462585034,
+          "end": 34.579569160997735,
+          "similarity": 0.72,
+          "score": 1.1620589338045457,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-4"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L7",
+          "start": 35.428072562358274,
+          "end": 37.39716553287982,
+          "similarity": 0.9473684210526315,
+          "score": 1.510508551041812,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-5"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L8",
+          "start": 39.19020408163265,
+          "end": 41.09526077097506,
+          "similarity": 1.0,
+          "score": 1.5960760794712339,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-6"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L9",
+          "start": 41.30340136054422,
+          "end": 47.386825396825394,
+          "similarity": 0.5555555555555556,
+          "score": 0.8754815703724953,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-7",
+            "vocal-8"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L10",
+          "start": 52.87795918367347,
+          "end": 59.96995464852608,
+          "similarity": 0.8484848484848485,
+          "score": 1.35791521053656,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-10"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L11",
+          "start": 60.770430839002266,
+          "end": 66.46963718820862,
+          "similarity": 0.6956521739130435,
+          "score": 1.0832413278569286,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-11",
+            "vocal-12"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L12",
+          "start": 68.61487528344671,
+          "end": 75.61081632653061,
+          "similarity": 0.896551724137931,
+          "score": 1.4315913627183645,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-13"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L13",
+          "start": 76.45931972789116,
+          "end": 82.73485260770975,
+          "similarity": 0.8333333333333334,
+          "score": 1.340163496758374,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-14"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L14",
+          "start": 83.11909297052154,
+          "end": 89.76283446712019,
+          "similarity": 0.782608695652174,
+          "score": 1.2255817324897145,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-15",
+            "vocal-16"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L15",
+          "start": 91.4598185941043,
+          "end": 99.00006802721089,
+          "similarity": 0.6086956521739131,
+          "score": 0.9509684666071332,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-18",
+            "vocal-19"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L16",
+          "start": 101.83369614512472,
+          "end": 106.89253968253968,
+          "similarity": 0.5263157894736842,
+          "score": 0.8262471956350983,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-21",
+            "vocal-22"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L17",
+          "start": 107.18072562358276,
+          "end": 109.94101205394438,
+          "similarity": 0.35714285714285715,
+          "score": 0.5198676700414302,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-23",
+            "vocal-24"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L18",
+          "start": 109.94101205394438,
+          "end": 111.551179138322,
+          "similarity": 0.35714285714285715,
+          "score": 0.5198676700414302,
+          "timing_source": "interpolated",
+          "source_segment_ids": [
+            "vocal-23",
+            "vocal-24"
+          ],
+          "issues": [
+            "coarse_timing",
+            "merged_line_evidence"
+          ]
+        },
+        {
+          "line_id": "L19",
+          "start": 117.55460317460317,
+          "end": 119.8598866213152,
+          "similarity": 0.9523809523809523,
+          "score": 1.5197243421506268,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-28"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L20",
+          "start": 121.73297052154194,
+          "end": 125.03081632653061,
+          "similarity": 0.5714285714285714,
+          "score": 0.9420028800001262,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-29"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L21",
+          "start": 125.38303854875284,
+          "end": 128.344693877551,
+          "similarity": 1.0,
+          "score": 1.6038721437491161,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-30"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L22",
+          "start": 128.5528344671202,
+          "end": 132.90727891156462,
+          "similarity": 0.7619047619047619,
+          "score": 1.2292737957692599,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-31"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L23",
+          "start": 133.24349206349206,
+          "end": 135.70886621315194,
+          "similarity": 1.0,
+          "score": 1.5977663017903783,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-32"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L24",
+          "start": 137.43786848072563,
+          "end": 140.70369614512472,
+          "similarity": 0.6153846153846154,
+          "score": 1.0111702999759102,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-33"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L25",
+          "start": 141.24802721088435,
+          "end": 145.7145351473923,
+          "similarity": 0.7777777777777778,
+          "score": 1.2623073959962046,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-34"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L26",
+          "start": 166.92657596371882,
+          "end": 174.0345804988662,
+          "similarity": 0.6666666666666666,
+          "score": 1.034668393955095,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-36",
+            "vocal-37"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L27",
+          "start": 174.78702947845804,
+          "end": 180.7904081632653,
+          "similarity": 1.0,
+          "score": 1.5961874325277654,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-38"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L28",
+          "start": 182.6314739229025,
+          "end": 186.88986394557824,
+          "similarity": 0.5384615384615384,
+          "score": 0.8834352866439974,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-39"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L29",
+          "start": 190.47591836734694,
+          "end": 199.6971201814059,
+          "similarity": 0.9333333333333333,
+          "score": 1.459015886538293,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-41",
+            "vocal-42"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L30",
+          "start": 200.0653514739229,
+          "end": 205.2042403628118,
+          "similarity": 0.13333333333333333,
+          "score": 0.22516930378267305,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-43",
+            "vocal-44"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L31",
+          "start": 205.47641723356008,
+          "end": 212.9846485260771,
+          "similarity": 0.7,
+          "score": 1.1014202010800156,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-45",
+            "vocal-46"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L32",
+          "start": 213.24081632653062,
+          "end": 219.66043083900226,
+          "similarity": 0.7619047619047619,
+          "score": 1.194157557697127,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-47",
+            "vocal-48"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L33",
+          "start": 222.12585034013605,
+          "end": 227.50487528344672,
+          "similarity": 0.47058823529411764,
+          "score": 0.7457544317409806,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-51",
+            "vocal-52"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L34",
+          "start": 227.95315192743763,
+          "end": 231.18696145124716,
+          "similarity": 0.4,
+          "score": 0.6784246885991645,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-53"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L35",
+          "start": 231.5231746031746,
+          "end": 233.87648526077098,
+          "similarity": 0.47619047619047616,
+          "score": 0.7772733977040094,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-54"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L36",
+          "start": 235.74956916099774,
+          "end": 242.3773015873016,
+          "similarity": 0.48484848484848486,
+          "score": 0.76605298504445,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-55",
+            "vocal-56"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L37",
+          "start": 242.60145124716553,
+          "end": 246.89185941043084,
+          "similarity": 0.5263157894736842,
+          "score": 0.8633939351105762,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-57"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L38",
+          "start": 247.1960544217687,
+          "end": 254.75231292517006,
+          "similarity": 0.25,
+          "score": 0.39911330988662597,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-58",
+            "vocal-59"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L39",
+          "start": 255.12054421768707,
+          "end": 262.9969841269841,
+          "similarity": 0.56,
+          "score": 0.8938029864951762,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-60",
+            "vocal-61"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L40",
+          "start": 263.31718820861676,
+          "end": 269.2725396825397,
+          "similarity": 0.4666666666666667,
+          "score": 0.738287463235188,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-62",
+            "vocal-63"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L41",
+          "start": 271.03356009070296,
+          "end": 277.72532879818596,
+          "similarity": 0.8484848484848485,
+          "score": 1.330016785043197,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-64",
+            "vocal-65"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L42",
+          "start": 277.99750566893425,
+          "end": 282.25589569160996,
+          "similarity": 1.0,
+          "score": 1.6029240500103181,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-66"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L43",
+          "start": 282.64013605442176,
+          "end": 284.6572562358277,
+          "similarity": 0.7368421052631579,
+          "score": 1.1853224592714957,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-67"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L44",
+          "start": 286.8665306122449,
+          "end": 290.1163492063492,
+          "similarity": 0.7058823529411765,
+          "score": 1.1463405797120971,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-68"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        },
+        {
+          "line_id": "L45",
+          "start": 290.5806349206349,
+          "end": 298.5806349206349,
+          "similarity": 1.0,
+          "score": 1.607429048943884,
+          "timing_source": "acoustic_core",
+          "source_segment_ids": [
+            "vocal-69"
+          ],
+          "issues": [
+            "coarse_timing"
+          ]
+        }
+      ]
+    }
+  ]
+}

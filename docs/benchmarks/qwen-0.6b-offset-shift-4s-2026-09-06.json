@@ -1,0 +1,1526 @@
+{
+  "model_load_seconds": 9.302838819101453,
+  "mode": "offset",
+  "source_shift": 4.0,
+  "records": [
+    {
+      "audio": "POWDER SNOW (Live Ver.).m4a",
+      "audio_source_id": "sha256:c40031ddd08b55303d046198606c3df0cbb102b1fdc1ddde55e30f27cfbdf97f",
+      "duration_seconds": 448.7253125,
+      "elapsed_seconds": 32.53419582452625,
+      "rtf": 0.07250358943039624,
+      "hot_transcription_seconds": 24.271130391396582,
+      "peak_cuda_allocated_bytes": 3332556800,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "offset",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 35,
+        "complete_coverage": 1.0,
+        "unresolved_lines": 0,
+        "start": {
+          "mae_seconds": 0.13870975056687485,
+          "p50_seconds": 0.13870975056687485,
+          "p90_seconds": 0.13870975056687485,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        },
+        "end": {
+          "mae_seconds": 0.13870975056687485,
+          "p50_seconds": 0.13870975056687485,
+          "p90_seconds": 0.13870975056687485,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": 129.84529024943313,
+          "end": 135.2932902494331,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L5",
+          "start": 135.2932902494331,
+          "end": 141.21129024943312,
+          "similarity": 0.5454545454545454,
+          "score": 1.8454545454545455,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-1"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L6",
+          "start": 141.21129024943312,
+          "end": 146.42129024943313,
+          "similarity": 0.6666666666666666,
+          "score": 1.9666666666666668,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-3"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L7",
+          "start": 146.42129024943313,
+          "end": 152.02429024943314,
+          "similarity": 0.5714285714285714,
+          "score": 1.8714285714285714,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-5"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L8",
+          "start": 152.02429024943314,
+          "end": 157.58029024943312,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-7"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L9",
+          "start": 157.58029024943312,
+          "end": 163.55729024943312,
+          "similarity": 0.6153846153846154,
+          "score": 1.9153846153846155,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-8"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L10",
+          "start": 163.55729024943312,
+          "end": 170.16429024943312,
+          "similarity": 0.7142857142857143,
+          "score": 2.0142857142857142,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-10"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L11",
+          "start": 170.16429024943312,
+          "end": 176.16129024943314,
+          "similarity": 0.5454545454545454,
+          "score": 1.8454545454545455,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-12"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L12",
+          "start": 176.16129024943314,
+          "end": 187.3112902494331,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-15"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L13",
+          "start": 187.3112902494331,
+          "end": 201.25429024943313,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L14",
+          "start": 201.25429024943313,
+          "end": 206.39629024943312,
+          "similarity": 0.9333333333333333,
+          "score": 2.0476190476190474,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-21"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L15",
+          "start": 206.39629024943312,
+          "end": 212.31229024943312,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-22"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L16",
+          "start": 212.31229024943312,
+          "end": 220.44429024943312,
+          "similarity": 0.8,
+          "score": 2.1,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-24"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L17",
+          "start": 220.44429024943312,
+          "end": 222.16829024943314,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L18",
+          "start": 222.16829024943314,
+          "end": 251.05229024943313,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L19",
+          "start": 251.05229024943313,
+          "end": 256.6042902494331,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L20",
+          "start": 256.6042902494331,
+          "end": 262.5162902494331,
+          "similarity": 0.6153846153846154,
+          "score": 1.9153846153846155,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-29"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L21",
+          "start": 262.5162902494331,
+          "end": 267.7902902494331,
+          "similarity": 0.6,
+          "score": 1.9,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-31"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L22",
+          "start": 267.7902902494331,
+          "end": 273.7342902494331,
+          "similarity": 0.5454545454545454,
+          "score": 1.8454545454545455,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-33"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L23",
+          "start": 273.7342902494331,
+          "end": 276.4552902494331,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-36"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L24",
+          "start": 276.4552902494331,
+          "end": 284.92729024943316,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L25",
+          "start": 284.92729024943316,
+          "end": 298.95129024943316,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L26",
+          "start": 298.95129024943316,
+          "end": 304.10329024943314,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-44"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L27",
+          "start": 304.10329024943314,
+          "end": 309.9272902494331,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-45"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L28",
+          "start": 309.9272902494331,
+          "end": 318.0202902494331,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L29",
+          "start": 318.0202902494331,
+          "end": 319.80329024943313,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L30",
+          "start": 319.80329024943313,
+          "end": 321.2582902494331,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L31",
+          "start": 321.2582902494331,
+          "end": 326.33229024943313,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L32",
+          "start": 326.33229024943313,
+          "end": 332.28329024943315,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-51"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L33",
+          "start": 332.28329024943315,
+          "end": 340.3642902494331,
+          "similarity": 0.8,
+          "score": 2.1,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-53"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L34",
+          "start": 340.3642902494331,
+          "end": 342.15129024943315,
+          "similarity": 0.6666666666666666,
+          "score": 1.9666666666666668,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-55"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L35",
+          "start": 342.15129024943315,
+          "end": 348.05029024943315,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L36",
+          "start": 348.05029024943315,
+          "end": 354.3882902494331,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L37",
+          "start": 354.3882902494331,
+          "end": 364.59429024943313,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L38",
+          "start": 364.59429024943313,
+          "end": 369.7682902494331,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-62"
+          ],
+          "issues": []
+        }
+      ]
+    },
+    {
+      "audio": "夜奏花.m4a",
+      "audio_source_id": "sha256:998d82233c0221a4a1bce5818250f3ed799b28f5db9a2233ce0619cf8d67fb70",
+      "duration_seconds": 353.0026875,
+      "elapsed_seconds": 26.489254762418568,
+      "rtf": 0.07503981046155228,
+      "hot_transcription_seconds": 21.769052398391068,
+      "peak_cuda_allocated_bytes": 2993831424,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "offset",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 33,
+        "complete_coverage": 1.0,
+        "unresolved_lines": 0,
+        "start": {
+          "mae_seconds": 0.14247165532881664,
+          "p50_seconds": 0.14247165532881922,
+          "p90_seconds": 0.14247165532881922,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        },
+        "end": {
+          "mae_seconds": 0.14247165532882267,
+          "p50_seconds": 0.14247165532881922,
+          "p90_seconds": 0.14247165532884765,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": 1.362471655328819,
+          "end": 8.95247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L5",
+          "start": 10.31247165532882,
+          "end": 16.12247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L6",
+          "start": 18.612471655328818,
+          "end": 24.50247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L7",
+          "start": 25.612471655328818,
+          "end": 40.88247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L8",
+          "start": 41.41247165532882,
+          "end": 45.56247165532882,
+          "similarity": 0.7272727272727273,
+          "score": 2.0272727272727273,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L9",
+          "start": 46.63247165532882,
+          "end": 53.15247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L10",
+          "start": 54.38247165532882,
+          "end": 60.49247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L11",
+          "start": 63.942471655328816,
+          "end": 72.88247165532881,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L12",
+          "start": 73.30247165532882,
+          "end": 79.24247165532881,
+          "similarity": 0.625,
+          "score": 1.7083333333333335,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-4"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L13",
+          "start": 79.61247165532882,
+          "end": 91.30247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L14",
+          "start": 91.91247165532882,
+          "end": 100.12247165532881,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L15",
+          "start": 114.16247165532883,
+          "end": 129.05247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L16",
+          "start": 129.44247165532883,
+          "end": 133.67247165532882,
+          "similarity": 0.8333333333333334,
+          "score": 2.1333333333333333,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-17"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L17",
+          "start": 134.48247165532882,
+          "end": 141.1524716553288,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L18",
+          "start": 141.9924716553288,
+          "end": 148.31247165532884,
+          "similarity": 0.9230769230769231,
+          "score": 2.0064102564102564,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-23"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L19",
+          "start": 151.07247165532883,
+          "end": 159.89247165532882,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-24"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L20",
+          "start": 160.38247165532883,
+          "end": 166.2424716553288,
+          "similarity": 0.5,
+          "score": 1.54,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-26"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L21",
+          "start": 166.69247165532883,
+          "end": 178.25247165532883,
+          "similarity": 0.5555555555555556,
+          "score": 1.8555555555555556,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-28"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L22",
+          "start": 178.98247165532882,
+          "end": 182.16247165532883,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L23",
+          "start": 182.8124716553288,
+          "end": 187.64247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L24",
+          "start": 189.9024716553288,
+          "end": 196.26247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L25",
+          "start": 216.9724716553288,
+          "end": 225.2424716553288,
+          "similarity": 0.5555555555555556,
+          "score": 1.8555555555555556,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-32"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L26",
+          "start": 226.1524716553288,
+          "end": 231.76247165532882,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L27",
+          "start": 232.44247165532883,
+          "end": 244.42247165532882,
+          "similarity": 0.5217391304347826,
+          "score": 1.8217391304347825,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-37"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L28",
+          "start": 244.82247165532883,
+          "end": 247.9024716553288,
+          "similarity": 0.8888888888888888,
+          "score": 2.188888888888889,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-39"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L29",
+          "start": 247.9324716553288,
+          "end": 256.69247165532886,
+          "similarity": 0.5263157894736842,
+          "score": 1.6096491228070176,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-40"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L30",
+          "start": 257.19247165532886,
+          "end": 263.08247165532885,
+          "similarity": 0.625,
+          "score": 1.7083333333333335,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-42"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L31",
+          "start": 263.42247165532876,
+          "end": 274.92247165532876,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L32",
+          "start": 275.7724716553288,
+          "end": 285.72247165532883,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L33",
+          "start": 292.0024716553288,
+          "end": 297.46247165532884,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-49"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L34",
+          "start": 299.7624716553288,
+          "end": 306.67247165532876,
+          "similarity": 0.6666666666666666,
+          "score": 1.6416666666666666,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-50"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L35",
+          "start": 315.21247165532884,
+          "end": 323.07247165532885,
+          "similarity": 0.6,
+          "score": 1.9,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-52"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L36",
+          "start": 324.6324716553288,
+          "end": 337.32247165532885,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        }
+      ]
+    },
+    {
+      "audio": "鳥の詩.m4a",
+      "audio_source_id": "sha256:faf6075ef7ba583989ea00d4dde7999e8fd7d29135563fdac51d14d5d88f9157",
+      "duration_seconds": 369.0666875,
+      "elapsed_seconds": 49.345645737834275,
+      "rtf": 0.1337038736064042,
+      "hot_transcription_seconds": 37.21317464765161,
+      "peak_cuda_allocated_bytes": 3050701312,
+      "peak_cuda_reserved_bytes": 4049600512,
+      "backend": {
+        "name": "qwen-asr",
+        "model_id": "Qwen/Qwen3-ASR",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+        "precision": "bfloat16"
+      },
+      "effective_config": {
+        "pipeline": {
+          "mode": "offset",
+          "language": null,
+          "vocal": {
+            "frame_seconds": 0.032,
+            "hop_seconds": 0.016,
+            "enter_threshold": 0.52,
+            "keep_threshold": 0.3,
+            "padding_seconds": 0.18,
+            "min_segment_seconds": 0.45,
+            "max_gap_seconds": 0.22,
+            "max_segment_seconds": 8.0
+          },
+          "line": {
+            "minimum_similarity": 0.08,
+            "skip_line_penalty": 0.34,
+            "skip_evidence_penalty": 0.24,
+            "max_evidence_per_line": 2,
+            "max_lines_per_evidence": 4
+          },
+          "offset": {
+            "minimum_similarity": 0.5,
+            "minimum_prefix_similarity": 0.68,
+            "minimum_anchors": 2,
+            "minimum_section_anchors": 2,
+            "maximum_delta_spread": 1.0,
+            "maximum_section_mad": 0.35,
+            "prefix_chars": 8
+          }
+        },
+        "transcriber": {
+          "backend": {
+            "name": "qwen-asr",
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "runtime_version": "qwen-asr 0.0.6; transformers 4.57.6; torch 2.14.0+cu130",
+            "precision": "bfloat16"
+          },
+          "config": {
+            "model_path": null,
+            "model_id": "Qwen/Qwen3-ASR",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "device_map": "cuda:0",
+            "precision": "bfloat16",
+            "attention_implementation": "sdpa",
+            "max_new_tokens": 128,
+            "top_k": 5,
+            "distribution_output_dir": null
+          }
+        },
+        "separator": {
+          "config": {
+            "model_name": "htdemucs",
+            "device": "cuda",
+            "model_revision": null,
+            "split": true,
+            "overlap": 0.25
+          },
+          "cache_identity": null
+        }
+      },
+      "metrics": {
+        "line_count": 42,
+        "complete_coverage": 1.0,
+        "unresolved_lines": 0,
+        "start": {
+          "mae_seconds": 0.10209070294785404,
+          "p50_seconds": 0.10209070294784794,
+          "p90_seconds": 0.10209070294786216,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        },
+        "end": {
+          "mae_seconds": 0.10209070294785437,
+          "p50_seconds": 0.10209070294786216,
+          "p90_seconds": 0.10209070294786216,
+          "within_0_25_seconds": 1.0,
+          "within_0_50_seconds": 1.0
+        }
+      },
+      "diagnostics": [],
+      "lines": [
+        {
+          "line_id": "L4",
+          "start": 15.779909297052152,
+          "end": 23.37390929705215,
+          "similarity": 0.5217391304347826,
+          "score": 1.636024844720497,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-0"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L5",
+          "start": 23.37390929705215,
+          "end": 30.427909297052153,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L6",
+          "start": 30.427909297052153,
+          "end": 34.92790929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L7",
+          "start": 34.92790929705215,
+          "end": 39.18790929705215,
+          "similarity": 0.9473684210526315,
+          "score": 2.2473684210526317,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-5"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L8",
+          "start": 39.18790929705215,
+          "end": 42.78790929705215,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-6"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L9",
+          "start": 42.78790929705215,
+          "end": 52.92190929705215,
+          "similarity": 0.6666666666666666,
+          "score": 1.5952380952380953,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-8"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L10",
+          "start": 52.92190929705215,
+          "end": 60.79790929705215,
+          "similarity": 0.8484848484848485,
+          "score": 1.8234848484848487,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-10"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L11",
+          "start": 60.79790929705215,
+          "end": 68.78090929705215,
+          "similarity": 0.6666666666666666,
+          "score": 1.75,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-11"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L12",
+          "start": 68.78090929705215,
+          "end": 76.39790929705215,
+          "similarity": 0.896551724137931,
+          "score": 2.034051724137931,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-13"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L13",
+          "start": 76.39790929705215,
+          "end": 83.11690929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L14",
+          "start": 83.11690929705215,
+          "end": 91.46890929705215,
+          "similarity": 0.5555555555555556,
+          "score": 1.8555555555555556,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-15"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L15",
+          "start": 91.46890929705215,
+          "end": 99.30490929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L16",
+          "start": 99.30490929705215,
+          "end": 107.18290929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L17",
+          "start": 107.18290929705215,
+          "end": 113.97890929705216,
+          "similarity": 0.5,
+          "score": 1.8,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-23"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L18",
+          "start": 113.97890929705216,
+          "end": 117.53990929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L19",
+          "start": 117.53990929705215,
+          "end": 121.74190929705215,
+          "similarity": 0.9523809523809523,
+          "score": 2.0898809523809523,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-27"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L20",
+          "start": 121.74190929705215,
+          "end": 125.37790929705216,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L21",
+          "start": 125.37790929705216,
+          "end": 128.59190929705215,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-29"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L22",
+          "start": 128.59190929705215,
+          "end": 133.21490929705215,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L23",
+          "start": 133.21490929705215,
+          "end": 137.48490929705213,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-31"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L24",
+          "start": 137.48490929705213,
+          "end": 141.10490929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L25",
+          "start": 141.10490929705213,
+          "end": 166.96790929705213,
+          "similarity": 0.7777777777777778,
+          "score": 2.077777777777778,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-33"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L26",
+          "start": 166.96790929705213,
+          "end": 174.84890929705216,
+          "similarity": 0.8888888888888888,
+          "score": 2.0263888888888886,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-35"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L27",
+          "start": 174.84890929705216,
+          "end": 182.80690929705213,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-37"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L28",
+          "start": 182.80690929705213,
+          "end": 190.51990929705215,
+          "similarity": 0.8666666666666667,
+          "score": 2.0041666666666664,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-38"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L29",
+          "start": 190.51990929705215,
+          "end": 200.04990929705212,
+          "similarity": 0.72,
+          "score": 1.8575,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-40"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L30",
+          "start": 200.04990929705212,
+          "end": 205.45690929705216,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L31",
+          "start": 205.45690929705216,
+          "end": 213.35690929705214,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L32",
+          "start": 213.35690929705214,
+          "end": 221.20290929705214,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L33",
+          "start": 221.20290929705214,
+          "end": 228.04190929705214,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L34",
+          "start": 228.04190929705214,
+          "end": 231.51390929705212,
+          "similarity": 0.8571428571428571,
+          "score": 1.9714285714285715,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-52"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L35",
+          "start": 231.51390929705212,
+          "end": 235.74190929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L36",
+          "start": 235.74190929705213,
+          "end": 242.65290929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L37",
+          "start": 242.65290929705213,
+          "end": 247.22990929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L38",
+          "start": 247.22990929705213,
+          "end": 255.14090929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L39",
+          "start": 255.14090929705213,
+          "end": 263.3529092970521,
+          "similarity": 0.6666666666666666,
+          "score": 1.7809523809523808,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-59"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L40",
+          "start": 263.3529092970521,
+          "end": 271.17690929705213,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L41",
+          "start": 271.17690929705213,
+          "end": 277.96390929705217,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L42",
+          "start": 277.96390929705217,
+          "end": 282.6269092970521,
+          "similarity": 1.0,
+          "score": 2.3,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-65"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L43",
+          "start": 282.6269092970521,
+          "end": 286.8509092970521,
+          "similarity": 0.8,
+          "score": 2.1,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-66"
+          ],
+          "issues": []
+        },
+        {
+          "line_id": "L44",
+          "start": 286.8509092970521,
+          "end": 290.50290929705216,
+          "similarity": null,
+          "score": null,
+          "timing_source": "source_offset",
+          "source_segment_ids": [],
+          "issues": []
+        },
+        {
+          "line_id": "L45",
+          "start": 290.50290929705216,
+          "end": 302.6339092970521,
+          "similarity": 0.8571428571428571,
+          "score": 2.157142857142857,
+          "timing_source": "source_offset",
+          "source_segment_ids": [
+            "vocal-68"
+          ],
+          "issues": []
+        }
+      ]
+    }
+  ]
+}
