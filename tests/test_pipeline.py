@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from lazulite.cache import FileCache, cache_key
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
 from lazulite.models.transcription import BackendInfo, TranscriptionSegment
@@ -56,3 +57,11 @@ def test_transcription_runner_splits_long_windows_without_changing_source_id() -
     ]
     assert [item.source_segment_id for item in result.segments] == ["verse-1"] * 3
     assert all(item.start is None for item in result.segments)
+
+
+def test_file_cache_uses_deterministic_keys(tmp_path) -> None:
+    cache = FileCache(tmp_path)
+    key = cache_key({"stage": "test", "value": [1, 2]})
+    cache.set_json(key, {"ok": True})
+    assert cache.get_json(key) == {"ok": True}
+    assert key == cache_key({"value": [1, 2], "stage": "test"})
