@@ -2,5 +2,6 @@
 
 from .base import FetchedLyricCandidate, LyricProvider, SearchCandidate
 from .netease import NeteaseProvider
+from .qqmusic import QQMusicProvider
 
-__all__ = ["FetchedLyricCandidate", "LyricProvider", "NeteaseProvider", "SearchCandidate"]
+__all__ = ["FetchedLyricCandidate", "LyricProvider", "NeteaseProvider", "QQMusicProvider", "SearchCandidate"]

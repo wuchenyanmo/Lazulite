@@ -22,6 +22,7 @@ from lazulite.lyrics.providers.netease import (
     lyrics_from_netease_payload,
 )
 from lazulite.audio.io import read_audio_metadata
+from lazulite.lyrics.providers.qqmusic import candidate_from_qq_result, lyrics_from_qq_payload
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -147,3 +148,10 @@ def test_audio_metadata_reads_search_fields_without_returning_raw_tags() -> None
     assert metadata.artist == "YURiKA"
     assert metadata.duration == pytest.approx(353.003, abs=0.1)
     assert not hasattr(metadata, "raw_tags")
+
+
+def test_qq_parser_supports_base64_lyrics() -> None:
+    candidate = candidate_from_qq_result({"mid": "abc", "name": "鳥の詩", "interval": 369, "singer": [{"name": "Lia"}], "album": {"name": "AIR"}}, title="鳥の詩", duration=369, artist="Lia", album=None)
+    lyrics = lyrics_from_qq_payload({"code": 0, "lyric": "WzAwOjAxLjAwXea2iOWIpuOCi+mjnuihjOmdoumbsiJ9"})
+    assert candidate.candidate_id == "abc"
+    assert lyrics is not None
