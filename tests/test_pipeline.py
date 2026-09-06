@@ -50,7 +50,24 @@ class _RecordingBackend:
 
     @property
     def cache_identity(self):
-        return {"backend": {"name": "fake", "revision": "test"}, "recipe": "test-v1"}
+        return {"backend": {"name": "fake", "revision": "test"}, "config": {"distribution_output_dir": None}, "recipe": "test-v1"}
+
+
+class _DistributionBackend(_RecordingBackend):
+    def __init__(self, distribution_path) -> None:
+        super().__init__(); self._distribution_path = distribution_path
+
+    @property
+    def cache_identity(self):
+        return {"backend": {"name": "fake", "revision": "test"}, "config": {"distribution_output_dir": str(self._distribution_path.parent)}, "recipe": "test-v1"}
+
+    def transcribe(self, inputs, *, request: TranscriptionRequest):
+        self.inputs = tuple(inputs)
+        self._distribution_path.write_bytes(b"npz")
+        return tuple(
+            TranscriptionSegment(item.segment.id, f"window-{index}", request.language, None, None, None, None, (), {"distribution_file": str(self._distribution_path)})
+            for index, item in enumerate(inputs)
+        )
 
 
 def test_transcription_runner_splits_long_windows_without_changing_source_id() -> None:
@@ -142,3 +159,21 @@ def test_hybrid_refinement_receives_the_dp_match_result(monkeypatch) -> None:
 
     assert received == [dp_result]
     assert result.alignment.strategy == "hybrid"
+
+
+def test_pipeline_recomputes_when_cached_full_distribution_was_removed(tmp_path) -> None:
+    audio = AudioBuffer(np.ones((1, 1_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
+    document = LyricDocument((LyricLine("L1", "window-0"),))
+    config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
+    cache = FileCache(tmp_path / "cache")
+    distribution = tmp_path / "distribution.npz"
+    first = _DistributionBackend(distribution)
+    second = _DistributionBackend(distribution)
+
+    AlignmentPipeline(transcriber=first, cache=cache).run(audio, document, config=config)
+    distribution.unlink()
+    AlignmentPipeline(transcriber=second, cache=cache).run(audio, document, config=config)
+
+    assert first.inputs
+    assert second.inputs
+    assert distribution.is_file()

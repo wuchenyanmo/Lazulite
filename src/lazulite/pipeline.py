@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import Any, Literal, Mapping, Protocol
 import warnings
 
@@ -123,6 +124,21 @@ class AlignmentPipeline:
             self._cache.set_json(key, self._serialize(result))
         return result
 
+    def _requires_full_distributions(self) -> bool:
+        identity = self._identity(self._transcriber)
+        config = None if identity is None else identity.get("config")
+        return isinstance(config, Mapping) and bool(config.get("distribution_output_dir"))
+
+    @staticmethod
+    def _distribution_files_exist(result: PipelineResult) -> bool:
+        if result.transcription is None:
+            return True
+        for segment in result.transcription.segments:
+            target = segment.backend_metadata.get("distribution_file")
+            if not isinstance(target, str) or not Path(target).is_file():
+                return False
+        return True
+
     def run(self, audio: AudioBuffer, document: LyricDocument, *, config: PipelineConfig = PipelineConfig()) -> PipelineResult:
         has_complete_source_times = bool(document.lines) and all(line.source_start is not None for line in document.lines)
         if config.mode == "offset" and not has_complete_source_times:
@@ -130,7 +146,7 @@ class AlignmentPipeline:
         key = self._cache_key(audio, document, config)
         if key is not None and self._cache is not None:
             cached = self._deserialize(self._cache.get_json(key) or {})
-            if cached is not None:
+            if cached is not None and (not self._requires_full_distributions() or self._distribution_files_exist(cached)):
                 self._emit("pipeline", "completed", "cache_hit")
                 return cached
         self._emit("analysis", "started")
