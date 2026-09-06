@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Lazulite contributors" }]
 dependencies = [
+    "fuzzywuzzy>=0.18,<1",
     "mutagen>=1.47",
     "numpy>=2.0",
     "opencc>=1.1",

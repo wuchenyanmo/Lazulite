@@ -15,6 +15,8 @@ from lazulite.models.transcription import TranscriptionSegment
 from lazulite.lyrics.lrc import read_lrc, with_translation, write_lrc
 from lazulite.lyrics.normalize import normalize_lyric_text
 from lazulite.lyrics.ttml import TtmlFormatError, read_ttml_for_alignment
+from lazulite.lyrics.search import SearchScoreFields, score_search_candidate
+from lazulite.lyrics.similarity import text_similarity
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -98,3 +100,11 @@ def test_ttml_rejects_unsupported_frame_time(tmp_path: Path) -> None:
 
     with pytest.raises(TtmlFormatError, match="不支持"):
         read_ttml_for_alignment(source)
+
+
+def test_shared_similarity_and_search_score_handle_normalization_and_duration() -> None:
+    fields = SearchScoreFields(180.0, ("鳥の詩 (TV Size)",), ("Lia",), ())
+
+    assert text_similarity("今日(きょう)、歌う", "今日 歌う") == 1.0
+    assert score_search_candidate(title="鳥の詩", duration=180.0, fields=fields, artist="Lia") > 75
+    assert score_search_candidate(title="鳥の詩", duration=205.1, fields=fields, artist="Lia") == 0.0
