@@ -119,6 +119,5 @@ class QwenBackend:
         return tuple(self._one(item, request) for item in inputs)
 
     def close(self) -> None:
-        del self._wrapper
-        if self._torch.cuda.is_available():
-            self._torch.cuda.empty_cache()
+        # Qwen 运行时在部分 CUDA 环境中 allocator 清理会终止解释器；释放实例即可。
+        self._wrapper = None

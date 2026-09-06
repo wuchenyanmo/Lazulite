@@ -133,5 +133,6 @@ class WhisperBackend:
         return tuple(self._one(item, request) for item in inputs)
 
     def close(self) -> None:
-        del self._model
-        if self._torch.cuda.is_available(): self._torch.cuda.empty_cache()
+        # 生命周期结束时断开模型引用，不在库内强制干预调用方的 CUDA allocator。
+        self._model = None
+        self._processor = None

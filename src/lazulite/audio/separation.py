@@ -52,6 +52,5 @@ class DemucsSeparator:
         return AudioBuffer(vocals, 44_100, audio.source_id)
 
     def close(self) -> None:
-        if self._model is not None: self._model.cpu()
+        # 由调用方决定是否清空 CUDA allocator，库仅结束本实例的模型所有权。
         self._model = None
-        if self._torch is not None and self._torch.cuda.is_available(): self._torch.cuda.empty_cache()

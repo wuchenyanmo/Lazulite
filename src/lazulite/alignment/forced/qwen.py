@@ -92,5 +92,4 @@ class QwenForcedAligner:
         return ForcedAlignmentResult(self.info, units, diagnostics)
 
     def close(self) -> None:
-        del self._model
-        if self._torch.cuda.is_available(): self._torch.cuda.empty_cache()
+        self._model = None
