@@ -93,3 +93,22 @@ def decode_audio(
         raise ValueError(f"FFmpeg 输出了无效的 PCM 数据: {path}")
     samples = values.reshape(-1, channels).T.copy()
     return AudioBuffer(samples=samples, sample_rate=sample_rate, source_id=f"sha256:{_file_sha256(path)}")
+
+
+def resample_audio(audio: AudioBuffer, *, sample_rate: int, channels: int | None = None) -> AudioBuffer:
+    """对内存音频做确定性线性重采样；模型输入的布局保持显式。"""
+    if sample_rate <= 0:
+        raise ValueError("sample_rate 必须为正数")
+    target_channels = channels if channels is not None else audio.samples.shape[0]
+    if target_channels <= 0:
+        raise ValueError("channels 必须为正数")
+    source = audio.samples
+    if target_channels == 1: source = source.mean(axis=0, keepdims=True)
+    elif target_channels == 2 and source.shape[0] == 1: source = np.repeat(source, 2, axis=0)
+    elif target_channels != source.shape[0]: raise ValueError("不支持该声道数转换")
+    if sample_rate == audio.sample_rate:
+        return AudioBuffer(source.astype(np.float32, copy=True), sample_rate, audio.source_id)
+    size = round(source.shape[1] * sample_rate / audio.sample_rate)
+    positions = np.linspace(0, source.shape[1] - 1, size, dtype=np.float64)
+    samples = np.vstack([np.interp(positions, np.arange(source.shape[1]), channel) for channel in source]).astype(np.float32)
+    return AudioBuffer(samples, sample_rate, audio.source_id)

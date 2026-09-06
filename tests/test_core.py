@@ -21,7 +21,7 @@ from lazulite.lyrics.providers.netease import (
     candidate_from_netease_result,
     lyrics_from_netease_payload,
 )
-from lazulite.audio.io import decode_audio, read_audio_metadata
+from lazulite.audio.io import decode_audio, read_audio_metadata, resample_audio
 from lazulite.audio.activity import VocalConfig, analyze_vocals
 from lazulite.lyrics.providers.qqmusic import candidate_from_qq_result, lyrics_from_qq_payload
 from lazulite.lyrics.providers.lrclib import lyrics_from_lrclib_payload
@@ -165,6 +165,13 @@ def test_activity_analysis_marks_core_and_padding_separately() -> None:
     analysis = analyze_vocals(AudioBuffer(samples, 1_000, "synthetic"), config=VocalConfig(min_segment_seconds=0.2))
     assert analysis.segments
     assert analysis.segments[0].start < analysis.segments[0].core_start
+
+
+def test_resample_audio_preserves_duration_and_explicit_channel_count() -> None:
+    audio = AudioBuffer(np.zeros((2, 4_410), dtype=np.float32), 44_100, "audio")
+    converted = resample_audio(audio, sample_rate=16_000, channels=1)
+    assert converted.samples.shape == (1, 1_600)
+    assert converted.duration == pytest.approx(audio.duration)
 
 
 def test_qq_parser_supports_base64_lyrics() -> None:
