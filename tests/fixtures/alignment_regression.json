@@ -1,0 +1,28 @@
+{
+  "schema": "alignment-regression-v1",
+  "backend": {
+    "name": "frozen",
+    "model_id": "fixture",
+    "revision": "fixture-v1",
+    "runtime_version": "fixture",
+    "precision": "float32"
+  },
+  "document": [
+    {"id": "L1", "text": "第一行"},
+    {"id": "L2", "text": "第二行"},
+    {"id": "L3", "text": "未匹配"}
+  ],
+  "segments": [
+    {"id": "s1", "section_id": "verse", "start": 9.5, "end": 13.5, "core_start": 10.0, "core_end": 13.0, "presence": 0.8, "off_center_risk": 0.0},
+    {"id": "s2", "section_id": "verse", "start": 19.5, "end": 23.5, "core_start": 20.0, "core_end": 23.0, "presence": 0.7, "off_center_risk": 0.0}
+  ],
+  "transcription": [
+    {"source_segment_id": "s1", "text": "第一行", "language": "ja", "start": null, "end": null, "confidence": null, "confidence_kind": null, "timed_text": [], "backend_metadata": {}},
+    {"source_segment_id": "s2", "text": "第二行", "language": "ja", "start": null, "end": null, "confidence": 0.0, "confidence_kind": "external", "timed_text": [], "backend_metadata": {}}
+  ],
+  "expected": [
+    {"line_id": "L1", "start": 10.0, "end": 13.0, "timing_source": "acoustic_core", "source_segment_ids": ["s1"]},
+    {"line_id": "L2", "start": 20.0, "end": 23.0, "timing_source": "acoustic_core", "source_segment_ids": ["s2"]},
+    {"line_id": "L3", "start": null, "end": null, "timing_source": "unresolved", "source_segment_ids": []}
+  ]
+}
