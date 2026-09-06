@@ -34,3 +34,25 @@ def test_dp_alignment_allows_bounded_multiple_lines_but_marks_coarse_time_as_int
     assert [line.timing_source for line in result.lines] == ["interpolated", "interpolated"]
     assert result.lines[0].start == 1
     assert result.lines[1].end == 3
+
+
+def test_offset_alignment_uses_consistent_offsets_per_vocal_section():
+    analysis = VocalAnalysis("audio", (
+        VocalSegment("s1", "a", 10, 12, 10, 12, 1, 0),
+        VocalSegment("s2", "a", 20, 22, 20, 22, 1, 0),
+        VocalSegment("s3", "b", 50, 52, 50, 52, 1, 0),
+        VocalSegment("s4", "b", 60, 62, 60, 62, 1, 0),
+    ))
+    document = LyricDocument((
+        LyricLine("L1", "甲", 0), LyricLine("L2", "乙", 10),
+        LyricLine("L3", "丙", 20), LyricLine("L4", "丁", 30),
+    ))
+    transcript = TranscriptionResult(
+        BackendInfo("fake", "fake", "r", "v", "float32"),
+        tuple(TranscriptionSegment(segment, text, "zh", None, None, None, None, (), {}) for segment, text in (("s1", "甲"), ("s2", "乙"), ("s3", "丙"), ("s4", "丁"))),
+    )
+    result = align_with_offset(document, transcript, analysis)
+
+    assert result.reliable
+    assert [line.start for line in result.lines] == [10, 20, 50, 60]
+    assert {anchor.line_id for anchor in result.anchors} == {"L1", "L2", "L3", "L4"}
