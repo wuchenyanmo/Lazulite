@@ -6,6 +6,7 @@ import numpy as np
 from lazulite.cache import FileCache, cache_key
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
+from lazulite.audio.activity import VocalConfig
 from lazulite.models.transcription import BackendInfo, TranscriptionSegment
 from lazulite.transcription.base import (
     TranscriberCapabilities,
@@ -72,6 +73,18 @@ def test_file_cache_uses_deterministic_keys(tmp_path) -> None:
 def test_pipeline_injects_backend_without_writing_audio():
     audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "audio")
     backend = _RecordingBackend(); pipeline = AlignmentPipeline(transcriber=backend)
-    result = pipeline.run(audio, LyricDocument((LyricLine("L1", "window-0"),)), config=PipelineConfig(mode="dp", vocal=__import__("lazulite.audio.activity", fromlist=["VocalConfig"]).VocalConfig(min_segment_seconds=0.2)))
+    result = pipeline.run(audio, LyricDocument((LyricLine("L1", "window-0"),)), config=PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2)))
     assert result.transcription is not None
     assert audio.samples[0, 0] == 0.5
+
+
+def test_pipeline_keeps_all_lines_unresolved_when_no_vocals_are_detected() -> None:
+    audio = AudioBuffer(np.zeros((1, 1_000), dtype=np.float32), 1_000, "silent")
+    result = AlignmentPipeline(transcriber=_RecordingBackend()).run(
+        audio,
+        LyricDocument((LyricLine("L1", "第一行"), LyricLine("L2", "第二行"))),
+    )
+
+    assert result.transcription is None
+    assert [line.line_id for line in result.alignment.lines] == ["L1", "L2"]
+    assert all(line.timing_source == "unresolved" for line in result.alignment.lines)

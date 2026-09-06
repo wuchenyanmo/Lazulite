@@ -10,7 +10,7 @@ from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.audio.activity import VocalConfig, analyze_vocals
 from lazulite.audio.io import resample_audio
 from lazulite.events import EventSink, ProgressEvent
-from lazulite.models.alignment import LineAlignmentResult
+from lazulite.models.alignment import AlignedLyricLine, LineAlignmentResult
 from lazulite.models.audio import AudioBuffer, VocalAnalysis
 from lazulite.models.lyrics import LyricDocument
 from lazulite.models.transcription import TranscriptionResult
@@ -50,7 +50,17 @@ class AlignmentPipeline:
         vocals = self._separator.separate(audio) if self._separator else audio
         analysis = analyze_vocals(vocals, config=config.vocal)
         if not analysis.segments:
-            unresolved = LineAlignmentResult(tuple(), "dp", False, (), ("no_vocal_evidence",))
+            # 无人声只是缺少自动化证据，不能丢失调用方传入的歌词行。
+            unresolved = LineAlignmentResult(
+                tuple(
+                    AlignedLyricLine(line.id, None, None, None, None, "unresolved", (), ("no_vocal_evidence",))
+                    for line in document.lines
+                ),
+                "dp",
+                False,
+                (),
+                ("no_vocal_evidence",),
+            )
             self._emit("analysis", "completed", "no_vocal_evidence")
             return PipelineResult(analysis, None, unresolved)
         self._emit("transcription", "started")

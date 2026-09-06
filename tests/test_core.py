@@ -25,6 +25,27 @@ from lazulite.audio.io import decode_audio, read_audio_metadata, resample_audio
 from lazulite.audio.activity import VocalConfig, analyze_vocals
 from lazulite.lyrics.providers.qqmusic import candidate_from_qq_result, lyrics_from_qq_payload
 from lazulite.lyrics.providers.lrclib import lyrics_from_lrclib_payload
+from lazulite.lyrics.providers.base import SearchCandidate
+from lazulite.lyrics.service import fetch_lyrics, rank_lyrics, search_lyrics
+from lazulite.models.transcription import BackendInfo, TranscriptionResult
+
+
+class _FakeProvider:
+    source_name = "fake"
+    priority = 5
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, str | None]] = []
+
+    def search(self, title, duration, artist=None, album=None, **kwargs):
+        self.calls.append((title, artist, album))
+        return [
+            SearchCandidate("fake", "same", "夜奏花", "YURiKA", None, duration, 80.0),
+            SearchCandidate("fake", "same", "夜奏花", "YURiKA", None, duration, 90.0),
+        ]
+
+    def fetch(self, candidate):
+        return read_lrc("[00:01.00]夜空を見上げて")
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -185,3 +206,20 @@ def test_lrclib_parser_falls_back_to_plain_text() -> None:
     lyrics = lyrics_from_lrclib_payload({"plainLyrics": "[ti:ignored]\n一行\n二行"})
     assert lyrics is not None
     assert [line.text for line in lyrics.document.lines] == ["一行", "二行"]
+
+
+def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: Path) -> None:
+    metadata = read_audio_metadata(Path(__file__).parent / "fixtures" / "夜奏花.m4a")
+    provider = _FakeProvider()
+    candidates = search_lyrics(metadata, providers=(provider,))
+    fetched = fetch_lyrics(candidates, providers=(provider,))
+    transcription = TranscriptionResult(
+        BackendInfo("test", "test/model", "revision", "runtime", "float32"),
+        (TranscriptionSegment("segment", "夜空を見上げて", "ja", None, None, None, None, (), {}),),
+    )
+    ranked = rank_lyrics(fetched, transcription, providers=(provider,))
+
+    assert len(candidates) == 1
+    assert candidates[0].match_score == 90.0
+    assert fetched[0].lyrics.document.lines[0].text == "夜空を見上げて"
+    assert ranked[0].content_score == 1.0
