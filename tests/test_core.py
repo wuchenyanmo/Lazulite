@@ -21,7 +21,7 @@ from lazulite.lyrics.providers.netease import (
     candidate_from_netease_result,
     lyrics_from_netease_payload,
 )
-from lazulite.audio.io import read_audio_metadata
+from lazulite.audio.io import decode_audio, read_audio_metadata
 from lazulite.lyrics.providers.qqmusic import candidate_from_qq_result, lyrics_from_qq_payload
 
 
@@ -148,6 +148,14 @@ def test_audio_metadata_reads_search_fields_without_returning_raw_tags() -> None
     assert metadata.artist == "YURiKA"
     assert metadata.duration == pytest.approx(353.003, abs=0.1)
     assert not hasattr(metadata, "raw_tags")
+
+
+def test_ffmpeg_decode_uses_explicit_channel_sample_layout() -> None:
+    audio = decode_audio(Path(__file__).parent / "fixtures" / "夜奏花.m4a", sample_rate=8_000)
+
+    assert audio.samples.dtype == np.float32
+    assert audio.samples.shape[0] == 1
+    assert audio.duration == pytest.approx(353.003, abs=0.1)
 
 
 def test_qq_parser_supports_base64_lyrics() -> None:

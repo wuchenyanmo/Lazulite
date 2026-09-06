@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+import subprocess
 from typing import Any
 
+import numpy as np
 from mutagen import File as mutagen_file
 
-from lazulite.models.audio import AudioMetadata
+from lazulite.models.audio import AudioBuffer, AudioMetadata
 
 
 def _first_text(value: Any) -> str | None:
@@ -54,3 +57,39 @@ def read_audio_metadata(audio_path: str | Path) -> AudioMetadata:
         album=album,
         duration=float(audio.info.length),
     )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def decode_audio(
+    audio_path: str | Path,
+    *,
+    sample_rate: int = 16_000,
+    channels: int = 1,
+) -> AudioBuffer:
+    """用 FFmpeg 解码并重采样；样本零点始终保留为整曲时间零点。"""
+    if sample_rate <= 0 or channels <= 0:
+        raise ValueError("sample_rate 与 channels 必须为正数")
+    path = Path(audio_path).expanduser().resolve()
+    command = [
+        "ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", str(channels),
+        "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
+    ]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True)
+    except FileNotFoundError as error:
+        raise RuntimeError("未找到 FFmpeg，无法解码音频") from error
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(f"无法解码音频 {path}: {detail}") from error
+    values = np.frombuffer(completed.stdout, dtype="<f4")
+    if values.size == 0 or values.size % channels:
+        raise ValueError(f"FFmpeg 输出了无效的 PCM 数据: {path}")
+    samples = values.reshape(-1, channels).T.copy()
+    return AudioBuffer(samples=samples, sample_rate=sample_rate, source_id=f"sha256:{_file_sha256(path)}")
