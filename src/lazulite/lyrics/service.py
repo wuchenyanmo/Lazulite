@@ -17,6 +17,7 @@ from lazulite.lyrics.providers import (
 )
 from lazulite.lyrics.similarity import text_similarity
 from lazulite.models.audio import AudioMetadata
+from lazulite.models.audio import VocalAnalysis
 from lazulite.models.transcription import TranscriptionResult
 
 from .search import build_search_text_variants
@@ -161,11 +162,12 @@ def _content_score(item: FetchedLyricCandidate, transcription: TranscriptionResu
 def rank_lyrics(
     candidates: Iterable[FetchedLyricCandidate],
     transcription: TranscriptionResult,
+    analysis: VocalAnalysis | None = None,
     *,
     providers: Sequence[LyricProvider] | None = None,
     metadata_weight: float = 0.55,
 ) -> tuple[RankedLyricCandidate, ...]:
-    """以通用转写正文重排歌词候选；置信度缺失和零值均不改变资格。"""
+    """以通用转写正文重排歌词候选；预留声学分析参数且不混入模型置信度。"""
     if not 0 <= metadata_weight <= 1:
         raise ValueError("metadata_weight 必须在 [0, 1] 内")
     selected = tuple(providers) if providers is not None else build_default_providers()
