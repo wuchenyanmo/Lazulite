@@ -43,9 +43,10 @@ def _observed_start(segment: VocalSegment, transcription: TranscriptionSegment) 
     return min(model_starts) if model_starts else segment.core_start
 
 
-def _candidate_matrix(document: LyricDocument, transcription: TranscriptionResult, analysis: VocalAnalysis, config: OffsetAlignmentConfig) -> tuple[tuple[_Candidate | None, ...], ...]:
+def _candidate_matrix(document: LyricDocument, transcription: TranscriptionResult, analysis: VocalAnalysis, config: OffsetAlignmentConfig, guidance: LineAlignmentResult | None) -> tuple[tuple[_Candidate | None, ...], ...]:
     segments = {segment.id: segment for segment in analysis.segments}
     timed_lines = [(index, line) for index, line in enumerate(document.lines) if line.source_start is not None]
+    guided_sources = None if guidance is None else {line.line_id: set(line.source_segment_ids) for line in guidance.lines}
     rows: list[tuple[_Candidate | None, ...]] = []
     for item in transcription.segments:
         segment = segments.get(item.source_segment_id)
@@ -54,6 +55,9 @@ def _candidate_matrix(document: LyricDocument, transcription: TranscriptionResul
         candidates: list[_Candidate | None] = []
         observed = _observed_start(segment, item)
         for index, line in timed_lines:
+            if guided_sources is not None and segment.id not in guided_sources.get(line.id, set()):
+                candidates.append(None)
+                continue
             full = text_similarity(line.text, item.text)
             prefix = prefix_similarity(line.text, item.text, prefix_chars=config.prefix_chars)
             if full < config.minimum_similarity or prefix < config.minimum_prefix_similarity:
@@ -126,13 +130,13 @@ def _anchor(candidate: _Candidate) -> AlignmentAnchor:
     return AlignmentAnchor(candidate.line_id, candidate.segment.id, candidate.offset, candidate.score)
 
 
-def align_with_offset(document: LyricDocument, transcription: TranscriptionResult, analysis: VocalAnalysis, *, config: OffsetAlignmentConfig = OffsetAlignmentConfig()) -> LineAlignmentResult:
-    """估计偏移并按声学 section 分配；锚点不足时全部保留为 unresolved。"""
+def align_with_offset(document: LyricDocument, transcription: TranscriptionResult, analysis: VocalAnalysis, *, config: OffsetAlignmentConfig = OffsetAlignmentConfig(), guidance: LineAlignmentResult | None = None) -> LineAlignmentResult:
+    """估计偏移并按声学 section 分配；可用 DP 匹配限制重排锚点。"""
     source_lines = [(index, line) for index, line in enumerate(document.lines) if line.source_start is not None]
     if not source_lines:
         lines = tuple(AlignedLyricLine(line.id, None, None, None, None, "unresolved", (), ("missing_source_time",)) for line in document.lines)
         return LineAlignmentResult(lines, "offset", False, (), ("missing_source_timestamps",))
-    matrix = _candidate_matrix(document, transcription, analysis, config)
+    matrix = _candidate_matrix(document, transcription, analysis, config, guidance)
     selected = _select_monotonic(matrix)
     by_section: dict[str | None, list[_Candidate]] = {}
     for candidate in selected:

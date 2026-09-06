@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from lazulite.cache import FileCache, cache_key
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
@@ -16,6 +17,8 @@ from lazulite.transcription.base import (
 from lazulite.transcription.run import transcribe_segments
 from lazulite.pipeline import AlignmentPipeline, PipelineConfig
 from lazulite.models.lyrics import LyricDocument, LyricLine
+from lazulite.models.alignment import AlignedLyricLine, LineAlignmentResult
+import lazulite.pipeline as pipeline_module
 
 
 class _RecordingBackend:
@@ -108,3 +111,34 @@ def test_pipeline_reuses_complete_result_only_for_a_content_addressed_cache_key(
     assert first.inputs
     assert second.inputs == ()
     assert cached.alignment.lines[0].line_id == "L1"
+
+
+def test_explicit_offset_requires_complete_source_times_before_running_models() -> None:
+    audio = AudioBuffer(np.zeros((1, 1_000), dtype=np.float32), 1_000, "audio")
+
+    with pytest.raises(ValueError, match="source_start"):
+        AlignmentPipeline(transcriber=_RecordingBackend()).run(
+            audio, LyricDocument((LyricLine("L1", "歌词"),)), config=PipelineConfig(mode="offset")
+        )
+
+
+def test_hybrid_refinement_receives_the_dp_match_result(monkeypatch) -> None:
+    dp_result = LineAlignmentResult((
+        AlignedLyricLine("L1", 1.0, 2.0, 1.0, 1.0, "acoustic_core", ("vocal-0",)),
+    ), "dp", True, ())
+    refined = LineAlignmentResult((
+        AlignedLyricLine("L1", 2.0, 3.0, 1.0, 1.0, "source_offset", ("vocal-0",)),
+    ), "offset", True, ())
+    received = []
+    monkeypatch.setattr(pipeline_module, "align_lines", lambda *args, **kwargs: dp_result)
+    monkeypatch.setattr(pipeline_module, "align_with_offset", lambda *args, **kwargs: received.append(kwargs["guidance"]) or refined)
+    audio = AudioBuffer(np.ones((1, 2_000), dtype=np.float32) * 0.5, 1_000, "audio")
+
+    result = AlignmentPipeline(transcriber=_RecordingBackend()).run(
+        audio,
+        LyricDocument((LyricLine("L1", "window-0", 0.0, 1.0),)),
+        config=PipelineConfig(mode="hybrid", vocal=VocalConfig(min_segment_seconds=0.2)),
+    )
+
+    assert received == [dp_result]
+    assert result.alignment.strategy == "hybrid"

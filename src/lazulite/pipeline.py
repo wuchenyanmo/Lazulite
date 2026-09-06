@@ -124,6 +124,9 @@ class AlignmentPipeline:
         return result
 
     def run(self, audio: AudioBuffer, document: LyricDocument, *, config: PipelineConfig = PipelineConfig()) -> PipelineResult:
+        has_complete_source_times = bool(document.lines) and all(line.source_start is not None for line in document.lines)
+        if config.mode == "offset" and not has_complete_source_times:
+            raise ValueError("offset 模式要求所有歌词行具有 source_start")
         key = self._cache_key(audio, document, config)
         if key is not None and self._cache is not None:
             cached = self._deserialize(self._cache.get_json(key) or {})
@@ -149,17 +152,16 @@ class AlignmentPipeline:
             return self._cache_result(key, PipelineResult(analysis, None, unresolved))
         self._emit("transcription", "started")
         transcription = transcribe_segments(resample_audio(vocals, sample_rate=16_000, channels=1), analysis.segments, transcriber=self._transcriber, request=TranscriptionRequest(language=config.language, include_timing=self._transcriber.capabilities.timestamp_granularity != "none"))
-        has_source_times = any(line.source_start is not None for line in document.lines)
-        if config.mode == "dp" or not has_source_times:
+        if config.mode == "dp" or not has_complete_source_times:
             alignment = align_lines(document, transcription, analysis, config=config.line)
-            if config.mode == "hybrid" and not has_source_times:
+            if config.mode == "hybrid" and not has_complete_source_times:
                 alignment = replace(alignment, diagnostics=alignment.diagnostics + ("hybrid_without_source_time",))
         elif config.mode == "offset":
             alignment = align_with_offset(document, transcription, analysis, config=config.offset)
         elif config.mode == "hybrid":
             # 先完成文本 DP，再以独立锚点估计源时间校正；失败保留 DP 结果。
             dp_result = align_lines(document, transcription, analysis, config=config.line)
-            refined = align_with_offset(document, transcription, analysis, config=config.offset)
+            refined = align_with_offset(document, transcription, analysis, config=config.offset, guidance=dp_result)
             alignment = replace(refined, strategy="hybrid") if refined.reliable else replace(
                 dp_result, strategy="hybrid", diagnostics=dp_result.diagnostics + ("offset_refinement_unreliable",)
             )
@@ -169,7 +171,7 @@ class AlignmentPipeline:
                 alignment = offset
             else:
                 dp_result = align_lines(document, transcription, analysis, config=config.line)
-                refined = align_with_offset(document, transcription, analysis, config=config.offset)
+                refined = align_with_offset(document, transcription, analysis, config=config.offset, guidance=dp_result)
                 alignment = replace(refined, strategy="hybrid", diagnostics=("offset_fallback",)) if refined.reliable else replace(
                     dp_result, diagnostics=dp_result.diagnostics + ("offset_fallback", "offset_refinement_unreliable")
                 )
