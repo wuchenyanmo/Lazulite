@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from lazulite.models.lyrics import LyricDocument, LyricLine, ReadingSpan
 from lazulite.models.transcription import TranscriptionSegment
 from lazulite.lyrics.lrc import read_lrc, with_translation, write_lrc
 from lazulite.lyrics.normalize import normalize_lyric_text
+from lazulite.lyrics.ttml import TtmlFormatError, read_ttml_for_alignment
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -68,3 +70,31 @@ def test_lrc_parses_metadata_singer_and_translation_without_rewriting_original_t
     assert "[00:02.00]今日(きょう)、歌う【Today, we sing】" in write_lrc(
         translated, include_translations=True
     )
+
+
+@pytest.mark.parametrize(
+    ("filename", "line_count", "first_id", "first_text"),
+    [
+        ("POWDER SNOW (Live Ver.).ttml", 35, "L4", "粉雪が空から"),
+        ("夜奏花.ttml", 33, "L4", "夜空を見上げて"),
+        ("鳥の詩.ttml", 42, "L4", "消える飛行機雲 僕たちは見送った"),
+    ],
+)
+def test_ttml_projects_fixture_lines_without_serializing_the_source(
+    filename: str, line_count: int, first_id: str, first_text: str
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / filename
+    document = read_ttml_for_alignment(fixture)
+
+    assert len(document.lines) == line_count
+    assert document.lines[0].id == first_id
+    assert document.lines[0].text == first_text
+    assert document.lines[0].source_start is not None
+
+
+def test_ttml_rejects_unsupported_frame_time(tmp_path: Path) -> None:
+    source = tmp_path / "unsupported.ttml"
+    source.write_text('<tt><body><p key="L1" begin="12f" end="13f">歌</p></body></tt>')
+
+    with pytest.raises(TtmlFormatError, match="不支持"):
+        read_ttml_for_alignment(source)
