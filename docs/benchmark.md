@@ -1,19 +1,22 @@
 # 整曲基准
 
-`tools/benchmark.py` 以 `tests/fixtures` 中的三首整曲音频为输入，读取同名 TTML 作为评估真值。DP 输入会清除 TTML 的人工时间；它们不会被送入自动对齐器。每行按稳定 `line_id` 比较，端点缺失计入覆盖率分母。
+`tools/benchmark.py` 使用三首整曲音频和同名人工 TTML，按稳定 `line_id` 评估行级时间候选。
 
 运行示例：
 
 ```bash
 python tools/benchmark.py \
   --backend qwen --model-path /models/Qwen3-ASR-0.6B \
-  --revision <固定revision或权重SHA256> --mode dp \
+  --revision REVISION --mode dp \
   --output benchmark.json
 ```
 
-输出是一个 JSON 对象，包含模型加载时间、模式与注入偏移，以及逐曲记录。每曲会保存音频 SHA256、总时长、热转写时长、RTF、CUDA allocated/reserved 峰值、后端及所有有效参数、逐行结果和诊断信息。`metrics.start` 与 `metrics.end` 分别保存 MAE、P50、P90、`≤0.25s`、`≤0.50s` 和完整覆盖率；端点缺失会留在覆盖率分母中。
+将模型路径和 `REVISION` 替换为实际目录及固定 revision 或权重 SHA256。JSON 保存模型加载时间、逐曲处理与热转写时长、RTF、CUDA 显存峰值、配置、逐行结果和诊断。
 
-`dp` 会清除全部 TTML 人工时间，防止真值泄漏。`offset`、`hybrid` 与 `auto` 则在每个真值端点减去 `--source-shift`（默认 4 秒），构造可验证偏移恢复能力的受控输入。逐行结果和原始 JSON 应与提交一同保存，避免只保留汇总数字。Qwen 没有 token 时间，DP 结果使用声学窗口，因此该 benchmark 不能解释为逐字 forced-alignment 准确率。
+- `dp` 输入歌词正文，人工时间用于评估。
+- `offset`、`hybrid`、`auto` 将源端点提前 `--source-shift` 秒（默认 4 秒），评估偏移恢复。
+- `metrics.start/end` 分别保存 MAE、P50/P90 和 0.25s、0.50s 内的比例，以可比较端点统计；`complete_coverage` 以全部歌词行为分母。
+- Qwen DP 采用声学 core 或插值时间。本页指标衡量行级候选，供人工复核和后续算法比较。
 
 ## 2026-09-06 重构验收基线
 
@@ -21,7 +24,7 @@ python tools/benchmark.py \
 
 模型权重身份已在本机核验：Qwen 0.6B 为提交 `5eb144179a02acc5e5ba31e748d22b0cf3e303b0`，`model.safetensors` SHA-256 为 `79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea`；Qwen 1.7B 两个分片的 SHA-256 分别为 `a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6` 和 `6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc`；Whisper large-v3 `model.safetensors` SHA-256 为 `a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95`。
 
-### DP：不泄漏 TTML 时间
+### DP：正文输入
 
 三组原始逐行记录： [Qwen 0.6B](benchmarks/qwen-0.6b-dp-2026-09-06.json)、[Qwen 1.7B](benchmarks/qwen-1.7b-dp-2026-09-06.json)、[Whisper large-v3](benchmarks/whisper-large-v3-dp-2026-09-06.json)。
 
@@ -37,7 +40,7 @@ python tools/benchmark.py \
 | Whisper large-v3 / 夜奏花 | 127.522s | 0.3612 | 93.94% / 2 | 4.919s | 5.089s | 114.104s | 6374 / 7314 MiB |
 | Whisper large-v3 / 鳥の詩 | 212.926s | 0.5769 | 97.62% / 1 | 1.141s | 2.920s | 204.952s | 6419 / 7314 MiB |
 
-模型加载分别为 Qwen 0.6B 9.404s、Qwen 1.7B 10.395s、Whisper large-v3 7.395s。覆盖率是有完整开始、结束候选的行数占比；每种端点指标只统计具有该端点的行。Qwen 路径没有 token 时间，因而 DP 的声学 core/插值结果不是逐字、mora 或 forced-alignment 精度。
+模型加载：Qwen 0.6B 9.404s、Qwen 1.7B 10.395s、Whisper large-v3 7.395s。完整覆盖率表示同时具有开始和结束候选的行数占比。
 
 ### offset / hybrid：已知 4 秒偏移
 
@@ -52,4 +55,4 @@ python tools/benchmark.py \
 | hybrid / 夜奏花 | 100.00% / 0 | 0.146s | 0.146s | `source_offset` |
 | hybrid / 鳥の詩 | 100.00% / 0 | 0.108s | 0.108s | `source_offset` |
 
-两种模式都恢复了受控偏移，且没有未解决行。hybrid 的细化结果在本数据上由可靠 offset 锚点确定；其 DP 引导与不可靠 offset 的回退语义另有针对性单元测试覆盖。
+两种模式均恢复受控偏移，完整覆盖全部歌词行。hybrid 使用 DP 匹配约束锚点；这一结果衡量已知源时间的偏移恢复能力。

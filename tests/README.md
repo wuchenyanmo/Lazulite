@@ -1,7 +1,13 @@
-# 重构测试素材
+# 测试与素材
 
-`fixtures/` 包含三首用户提供的歌曲、清洗后的人工 TTML 和秒制 manifest。旧 `test/` 的生成输出已删除。
+运行 CPU 测试：
 
-这是整曲本地 benchmark 素材，不自动加入普通单元测试，不打入 wheel。时间真值不得泄漏进待评估的 DP 输入。
+```bash
+python -m pytest
+```
 
-素材的使用边界、评估方法和当前结果见项目内 [docs/benchmark.md](../docs/benchmark.md)；核心架构约定见 [docs/refactoring.md](../docs/refactoring.md)。
+`fixtures/` 保存三首歌曲、人工 TTML、含 SHA256 的秒制 `manifest.json`，以及 DP 冻结样例。普通测试使用素材检查解析、解码和数据约定；模型推理由显式 benchmark 命令执行。
+
+整曲 DP 评估使用歌词正文，人工时间用于计算误差。offset/hybrid 评估使用注入已知偏移的源时间。
+
+方法与结果见[整曲基准](../docs/benchmark.md)，数据约定见[架构说明](../docs/refactoring.md)。
