@@ -17,6 +17,7 @@ def test_cli_exposes_the_documented_commands_without_importing_models() -> None:
     assert lyrics.lyrics_command == "search"
     assert forced.command == "forced-align"
     assert forced.revision == "abc123"
+    assert not hasattr(forced, "full_distributions")
 
 
 def test_cli_returns_a_concise_nonzero_error_for_missing_input(tmp_path) -> None:

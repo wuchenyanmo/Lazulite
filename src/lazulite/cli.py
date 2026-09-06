@@ -23,8 +23,10 @@ def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = Fals
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--model-id", default="Qwen/Qwen3-ForcedAligner-0.6B" if forced else None)
     parser.add_argument("--revision", required=True, help="模型权重对应的固定 revision 或 SHA256")
-    parser.add_argument("--device", default="cuda", help="Whisper/Demucs 使用的 Torch 设备")
     parser.add_argument("--device-map", default="cuda:0", help="Qwen 使用的 Transformers device_map")
+    if forced:
+        return
+    parser.add_argument("--device", default="cuda", help="Whisper 使用的 Torch 设备")
     parser.add_argument("--top-k", type=int, default=5, help="每个生成 token 保留的候选数")
     parser.add_argument("--full-distributions", type=Path, help="按分片导出完整 logprob NPZ 的目录")
 
