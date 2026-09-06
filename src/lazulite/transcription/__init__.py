@@ -6,10 +6,12 @@ from .base import (
     TranscriptionInput,
     TranscriptionRequest,
 )
+from .run import transcribe_segments
 
 __all__ = [
     "Transcriber",
     "TranscriberCapabilities",
     "TranscriptionInput",
     "TranscriptionRequest",
+    "transcribe_segments",
 ]
