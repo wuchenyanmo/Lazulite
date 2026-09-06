@@ -1,65 +1,73 @@
-## Lazulite: *Lyric Alignment* with isolated transcription and robust time estimation
-这是一个用于“歌曲音频与已有歌词对齐”的 Python 项目。现在可用的开源asr模型都没有能从头转写歌词的能力，所以这个项目只实现了将音频与本地/在线获取的歌词对齐的功能，并且只能做到行级对齐，但是内部模块的功能可能可用于从头转写歌词的前处理。
-目前对日语和粤语歌曲进行了少量测试，效果很好，即使在转写结果大部分全错的情况下依靠声学分析的分句也能可靠地利用少量正确转写结果对齐，其他语言暂未测试
+# Lazulite
 
-## 功能概览
-
-- 读取音频元数据，自动搜索歌词（支持酷狗、QQ、网易、LRCLIB），或直接使用本地歌词
-- 使用 Demucs 分离人声，并按人声活动做句级分片，根据双声道偏离中置的程度和人声能量评估片段分数
-- 使用 Whisper 对高价值片段转写
-- 对齐歌词，使用三种对齐模式：
-  - `offset-only`：通过高置信度的anchor片段估计已有歌词与本地音频的全局或分段时间偏移
-  - `dp-only`：使用 token 时间戳和单调动态规划做细粒度的文本约束对齐
-  - `hybrid`：若有原始时间戳，根据`dp-only`的对齐结果重新估计全局或分段的时间偏移；若源歌词无时间戳，退化为`dp-only`
-  - `auto`：默认值，优先使用`offset-only`尝试估计偏移，anchor片段数过少或偏移不一致时回退至`hybrid`模式
+Lazulite 是一个可安装的歌词自动化引擎：它读取音频元数据、搜索并重排歌词候选，分离人声并生成声学窗口，通过可替换 ASR 后端建立转写证据，再输出行级时间候选。它不保存项目状态、不覆盖输入媒体，也不提供 TTML 编辑器或 Web 服务。
 
 ## 安装
-1. 安装ffmpeg
 
-2. 参考PyTorch 安装说明：https://pytorch.org/get-started/locally/ ，
-按自己CUDA版本和平台手动安装`torch`、`torchaudio`、`torchvision` 以及 `torchcodec`。
-示例（CUDA 12.8）：
+基础功能不安装 Torch、Demucs 或模型。需要 Python 3.12 及 FFmpeg：
+
 ```bash
-pip install torch torchaudio torchvision torchcodec --index-url https://download.pytorch.org/whl/cu128
+python -m pip install .
 ```
 
-3. 安装其余依赖：
+按实际能力安装 extra；CUDA Torch wheel 的来源由部署环境决定。Qwen 与 Whisper 使用已验证的约束版本：
+
 ```bash
-pip install -r requirements.txt
+python -m pip install --constraint constraints.txt '.[qwen,whisper,vocal,forced-qwen]'
 ```
 
-4. 安装 FlashAttention-2 加速推理（可选，仅支持Ampere以上架构GPU，即RTX 30系及以上）：
-参考FlashAttention仓库：https://github.com/Dao-AILab/flash-attention
+模型必须由调用方下载并指定本地目录。每次命令均要求填写固定 Hub revision 或本地权重 SHA256；这会进入 JSON 证据和缓存身份，不能用不明确的 `local` 占位。
 
-## 用法
+## 命令行
 
-使用本地歌词（lrc或txt格式，需要保证歌词顺序和完整性，可以没有时间戳）：
 ```bash
-python -m Lazulite example.m4a \
-  --lyric-path example.lrc \
-  --language ja \
-  --output-lrc example.lrc \
+lazulite lyrics search song.m4a --output candidates.json
+
+lazulite transcribe song.m4a \
+  --backend whisper --model-path /models/whisper-large-v3 \
+  --revision <固定revision> --language ja --output transcript.json
+
+lazulite align song.m4a lyrics.ttml \
+  --backend qwen --model-path /models/Qwen3-ASR-1.7B \
+  --revision <固定revision或权重SHA256> --mode auto --output alignment.json
+
+lazulite forced-align clip.wav confirmed.txt \
+  --backend qwen --model-path /models/Qwen3-ForcedAligner-0.6B \
+  --revision <固定revision或权重SHA256> --language ja --output fine.json
 ```
 
-在线获取歌词：
-```bash
-python -m Lazulite example.m4a
+`align` 默认使用 Demucs；仅在已经输入分离人声或进行诊断时使用 `--without-separation`。`--full-distributions DIR` 可按片段导出完整 `logprob` NPZ；普通 JSON 只保留生成步、选中 token 概率和 top-k 摘要。Qwen 没有 token 时间，因此其行级粗时间来自声学 core 窗口，不会被误标为模型时间。
+
+## Python API
+
+```python
+from lazulite.audio.io import read_audio_metadata
+from lazulite.lyrics import fetch_lyrics, rank_lyrics, search_lyrics
+from lazulite.audio.activity import analyze_vocals
+from lazulite.transcription.run import transcribe_segments
+
+metadata = read_audio_metadata("song.m4a")
+candidates = search_lyrics(metadata)
+lyrics = fetch_lyrics(candidates)
+analysis = analyze_vocals(audio)
+transcription = transcribe_segments(audio, analysis.segments, transcriber=backend)
+ranked = rank_lyrics(lyrics, transcription, analysis)
 ```
 
-批处理模式（批量处理目录下的音频文件，不递归遍历）：
+`AlignmentPipeline` 只组合已注入的 separator、转写器、可选 `FileCache` 和事件回调。缓存仅在音频 `source_id` 是 SHA256 且运行资源提供完整模型/参数身份时启用；其键包含输入内容、算法版本、歌词投影、转写配置和模型 revision。缓存目录必须由调用方传入，库不会创建用户项目或自动清理目录。
+
+## 时间与 forced alignment 限制
+
+所有公开时间均为相对于整曲起点的秒数。未匹配的歌词行保留在结果中，时间为 `null`；多行共用声学窗口时只标 `interpolated`。`confidence=None` 与合法的 `0` 不同，缺失置信度不会自动丢弃候选。
+
+Qwen forced aligner 是独立实验后端，只对调用方已确认的一段正文工作。它按实际返回的字符或词输出范围；无法明确回写的单位会记录诊断。它不承诺日语 mora/phoneme 对齐，也不把人工 TTML 时间作为自动对齐输入。
+
+## 开发验证与基准
+
 ```bash
-python -m Lazulite <dir>
+python -m pytest
+python -m build
+python tools/benchmark.py --backend qwen --model-path /models/Qwen3-ASR-0.6B --revision <revision> --output benchmark.json
 ```
 
-对齐模式的选择：
-- `offset-only`：如果你的显存是6G及以下，基本只能选择这个模式，除非你能接受溢出显存后极慢的转写速度。该模式对声学分句和转写的准确度都有较高的依赖，适合咬字清晰、断句清楚的歌曲，而且也依赖源歌词时间轴
-- `dp-only`：由于需要返回token级的时间戳，显存占用会达到8G左右，该模式强依赖于声学分句的准确性，反而对转写质量没有太高要求，对一些断句位置很奇怪的日语歌效果较差，很适合中文歌曲
-- `hybrid`：同样依赖源歌词时间轴，但是对声学分句准确度和转写质量的依赖大大降低，显存占用和`dp-only`模式相同
-- `auto`：一般情况下可以达到不错的效果，但会默认歌词源的时间轴是可信的（即仅有整体或段落级的偏移），如果是极小众的歌曲，或者罕见编曲版本和Live版本，建议使用`dp-only`模式
-
-使用 `python -m Lazulite --help` 查看更多参数和用法，也可作为 Python 库导入并调用
-
-## 性能
-默认模型是 Whisper-large-v3 ，参数量约1.5B，首次运行时会自动从 Hugging Face 下载模型
-
-在RTX 4090上测试，`offset-only`模式单首歌曲耗时30秒，峰值占用显存约5G，若回退到`hybrid`或`dp-only`模式则增加至1分钟，峰值占用显存约8G
+`tests/fixtures` 是三首整曲基准素材，不随 wheel 安装，也不在每次 pytest 中运行模型。基准方法、指标和最近一次记录见 [docs/benchmark.md](docs/benchmark.md)。重构范围和模型字段实测依据见 [docs/refactoring.md](docs/refactoring.md)。
