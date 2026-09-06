@@ -16,6 +16,19 @@ from lazulite.pipeline import AlignmentPipeline, PipelineConfig
 from lazulite.transcription.backends import QwenBackend, QwenConfig, WhisperBackend, WhisperConfig
 
 
+def _metric_summary(errors: list[float]) -> dict[str, float | None]:
+    if not errors:
+        return {"mae_seconds": None, "p50_seconds": None, "p90_seconds": None, "within_0_25_seconds": None, "within_0_50_seconds": None}
+    ordered = sorted(errors)
+    return {
+        "mae_seconds": sum(errors) / len(errors),
+        "p50_seconds": ordered[round((len(ordered) - 1) * 0.50)],
+        "p90_seconds": ordered[round((len(ordered) - 1) * 0.90)],
+        "within_0_25_seconds": sum(item <= 0.25 for item in errors) / len(errors),
+        "within_0_50_seconds": sum(item <= 0.50 for item in errors) / len(errors),
+    }
+
+
 def _metrics(reference: LyricDocument, alignment) -> dict[str, object]:
     truth = {line.id: line for line in reference.lines}
     start_errors: list[float] = []
@@ -29,18 +42,25 @@ def _metrics(reference: LyricDocument, alignment) -> dict[str, object]:
             end_errors.append(abs(item.end - line.source_end))
         if item.start is not None and item.end is not None:
             complete += 1
-    errors = start_errors + end_errors
-    percentile = lambda value: None if not errors else sorted(errors)[round((len(errors) - 1) * value)]
     return {
         "line_count": len(reference.lines),
-        "matched_coverage": complete / max(len(reference.lines), 1),
+        "complete_coverage": complete / max(len(reference.lines), 1),
         "unresolved_lines": sum(item.start is None for item in alignment.lines),
-        "endpoint_mae_seconds": None if not errors else sum(errors) / len(errors),
-        "endpoint_p50_seconds": percentile(0.50),
-        "endpoint_p90_seconds": percentile(0.90),
-        "endpoint_within_0_25_seconds": None if not errors else sum(item <= 0.25 for item in errors) / len(errors),
-        "endpoint_within_0_50_seconds": None if not errors else sum(item <= 0.50 for item in errors) / len(errors),
+        "start": _metric_summary(start_errors),
+        "end": _metric_summary(end_errors),
     }
+
+
+def _evaluation_document(reference: LyricDocument, *, mode: str, source_shift: float) -> LyricDocument:
+    if mode == "dp":
+        return LyricDocument(tuple(replace(line, source_start=None, source_end=None) for line in reference.lines), reference.language)
+    return LyricDocument(tuple(
+        replace(
+            line,
+            source_start=None if line.source_start is None else line.source_start - source_shift,
+            source_end=None if line.source_end is None else line.source_end - source_shift,
+        ) for line in reference.lines
+    ), reference.language)
 
 
 def main() -> int:
@@ -50,10 +70,13 @@ def main() -> int:
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--mode", choices=("dp", "offset", "hybrid", "auto"), default="dp")
+    parser.add_argument("--source-shift", type=float, default=4.0, help="非 DP 模式注入的已知源时间偏移秒数")
     parser.add_argument("--without-separation", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
+    model_started = perf_counter()
     backend = QwenBackend(QwenConfig(arguments.model_path, "Qwen/Qwen3-ASR", arguments.revision)) if arguments.backend == "qwen" else WhisperBackend(WhisperConfig(arguments.model_path, "openai/whisper-large-v3", arguments.revision))
+    model_load_seconds = perf_counter() - model_started
     separator = None if arguments.without_separation else DemucsSeparator(DemucsConfig())
     records: list[dict[str, object]] = []
     try:
@@ -62,28 +85,54 @@ def main() -> int:
             if not ttml.exists():
                 continue
             reference = read_ttml_for_alignment(ttml)
-            # DP 评估不向自动算法泄漏人工时间。
-            input_document = LyricDocument(tuple(replace(line, source_start=None, source_end=None) for line in reference.lines), reference.language)
+            input_document = _evaluation_document(reference, mode=arguments.mode, source_shift=arguments.source_shift)
             audio = decode_audio(source)
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+            events: list[tuple[str, str, float]] = []
             started = perf_counter()
-            result = AlignmentPipeline(transcriber=backend, separator=separator).run(audio, input_document, config=PipelineConfig(mode=arguments.mode, language=reference.language))
+            result = AlignmentPipeline(
+                transcriber=backend,
+                separator=separator,
+                event_sink=lambda event: events.append((event.stage, event.kind, perf_counter())),
+            ).run(audio, input_document, config=PipelineConfig(mode=arguments.mode, language=reference.language))
             elapsed = perf_counter() - started
+            transcription_started = next((time for stage, kind, time in events if (stage, kind) == ("transcription", "started")), None)
+            transcription_completed = next((time for stage, kind, time in events if (stage, kind) == ("transcription", "completed")), None)
             records.append({
                 "audio": source.name,
                 "audio_source_id": audio.source_id,
                 "duration_seconds": audio.duration,
                 "elapsed_seconds": elapsed,
                 "rtf": elapsed / audio.duration,
+                "hot_transcription_seconds": None if transcription_started is None or transcription_completed is None else transcription_completed - transcription_started,
+                "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated() if torch.cuda.is_available() else None,
+                "peak_cuda_reserved_bytes": torch.cuda.max_memory_reserved() if torch.cuda.is_available() else None,
                 "backend": asdict(result.transcription.backend) if result.transcription else asdict(backend.info),
+                "effective_config": {
+                    "pipeline": asdict(PipelineConfig(mode=arguments.mode, language=reference.language)),
+                    "transcriber": backend.cache_identity,
+                    "separator": {"kind": "none"} if separator is None else {
+                        "config": asdict(separator.config),
+                        "cache_identity": separator.cache_identity,
+                    },
+                },
                 "metrics": _metrics(reference, result.alignment),
                 "diagnostics": list(result.alignment.diagnostics),
+                "lines": asdict(result.alignment)["lines"],
             })
     finally:
         if separator is not None:
             separator.close()
         backend.close()
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    arguments.output.write_text(json.dumps(records, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    arguments.output.write_text(json.dumps({
+        "model_load_seconds": model_load_seconds,
+        "mode": arguments.mode,
+        "source_shift": None if arguments.mode == "dp" else arguments.source_shift,
+        "records": records,
+    }, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     return 0
 
 

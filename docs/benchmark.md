@@ -11,7 +11,9 @@ python tools/benchmark.py \
   --output benchmark.json
 ```
 
-输出逐曲记录音频 SHA256、运行时与 RTF、matched coverage、未解决行数、端点 MAE/P50/P90，以及 `≤0.25s` 与 `≤0.50s` 比例。Qwen 没有 token 时间，DP 结果使用声学窗口，因此该 benchmark 不能解释为逐字 forced-alignment 准确率。
+输出是一个 JSON 对象，包含模型加载时间、模式与注入偏移，以及逐曲记录。每曲会保存音频 SHA256、总时长、热转写时长、RTF、CUDA allocated/reserved 峰值、后端及所有有效参数、逐行结果和诊断信息。`metrics.start` 与 `metrics.end` 分别保存 MAE、P50、P90、`≤0.25s`、`≤0.50s` 和完整覆盖率；端点缺失会留在覆盖率分母中。
+
+`dp` 会清除全部 TTML 人工时间，防止真值泄漏。`offset`、`hybrid` 与 `auto` 则在每个真值端点减去 `--source-shift`（默认 4 秒），构造可验证偏移恢复能力的受控输入。逐行结果和原始 JSON 应与提交一同保存，避免只保留汇总数字。Qwen 没有 token 时间，DP 结果使用声学窗口，因此该 benchmark 不能解释为逐字 forced-alignment 准确率。
 
 ## 2026-09-06 重构基线
 

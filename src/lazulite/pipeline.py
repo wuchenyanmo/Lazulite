@@ -168,6 +168,8 @@ class AlignmentPipeline:
             return self._cache_result(key, PipelineResult(analysis, None, unresolved))
         self._emit("transcription", "started")
         transcription = transcribe_segments(resample_audio(vocals, sample_rate=16_000, channels=1), analysis.segments, transcriber=self._transcriber, request=TranscriptionRequest(language=config.language, include_timing=self._transcriber.capabilities.timestamp_granularity != "none"))
+        self._emit("transcription", "completed")
+        self._emit("alignment", "started")
         if config.mode == "dp" or not has_complete_source_times:
             alignment = align_lines(document, transcription, analysis, config=config.line)
             if config.mode == "hybrid" and not has_complete_source_times:

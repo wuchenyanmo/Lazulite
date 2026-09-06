@@ -40,6 +40,11 @@ class DemucsSeparator:
         return self._model
 
     @property
+    def config(self) -> DemucsConfig:
+        """返回本实例实际使用的分离参数，供调用方记录可复现实验。"""
+        return self._config
+
+    @property
     def cache_identity(self) -> dict[str, object] | None:
         """未指定权重身份时不允许缓存分离后的自动化结果。"""
         if not self._config.model_revision:
