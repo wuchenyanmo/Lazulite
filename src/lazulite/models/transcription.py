@@ -1,0 +1,77 @@
+"""模型无关的转写结果与时间证据。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from math import isfinite
+from typing import Literal
+
+TimedTextGranularity = Literal["subword", "word", "character", "segment"]
+TimedTextSource = Literal["model", "alignment"]
+
+
+def _validate_time(value: float | None, field_name: str) -> None:
+    if value is not None and not isfinite(value):
+        raise ValueError(f"{field_name} 必须为有限秒数或 None")
+
+
+@dataclass(frozen=True, slots=True)
+class BackendInfo:
+    name: str
+    model_id: str
+    revision: str
+    runtime_version: str
+    precision: str
+
+    def __post_init__(self) -> None:
+        if not all(
+            (self.name, self.model_id, self.revision, self.runtime_version, self.precision)
+        ):
+            raise ValueError("后端身份字段均不能为空")
+
+
+@dataclass(frozen=True, slots=True)
+class TimedText:
+    text: str
+    start: float | None
+    end: float | None
+    granularity: TimedTextGranularity
+    source: TimedTextSource
+
+    def __post_init__(self) -> None:
+        _validate_time(self.start, "TimedText.start")
+        _validate_time(self.end, "TimedText.end")
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError("TimedText 的开始时间不能晚于结束时间")
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionSegment:
+    source_segment_id: str
+    text: str
+    language: str | None
+    start: float | None
+    end: float | None
+    confidence: float | None
+    confidence_kind: str | None
+    timed_text: tuple[TimedText, ...]
+    backend_metadata: dict[str, object]
+
+    def __post_init__(self) -> None:
+        if not self.source_segment_id:
+            raise ValueError("转写结果必须关联 source_segment_id")
+        _validate_time(self.start, "TranscriptionSegment.start")
+        _validate_time(self.end, "TranscriptionSegment.end")
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError("转写片段的开始时间不能晚于结束时间")
+        if self.confidence is not None:
+            if not isfinite(self.confidence) or not 0 <= self.confidence <= 1:
+                raise ValueError("confidence 必须在 [0, 1] 内或为 None")
+        if self.confidence is None and self.confidence_kind is not None:
+            raise ValueError("没有 confidence 时不能声明 confidence_kind")
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionResult:
+    backend: BackendInfo
+    segments: tuple[TranscriptionSegment, ...]
