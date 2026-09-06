@@ -21,3 +21,16 @@ def test_offset_alignment_uses_core_start_without_missing_confidence_filter():
     result = align_with_offset(document, transcript, analysis)
     assert result.reliable
     assert result.lines[0].start == 11.5
+
+
+def test_dp_alignment_allows_bounded_multiple_lines_but_marks_coarse_time_as_interpolated():
+    analysis = VocalAnalysis("audio", (VocalSegment("s1", None, 0, 4, 1, 3, 1, 0),))
+    transcript = TranscriptionResult(
+        BackendInfo("fake", "fake", "r", "v", "float32"),
+        (TranscriptionSegment("s1", "一二", "ja", None, None, None, None, (), {}),),
+    )
+    result = align_lines(LyricDocument((LyricLine("L1", "一"), LyricLine("L2", "二"))), transcript, analysis)
+
+    assert [line.timing_source for line in result.lines] == ["interpolated", "interpolated"]
+    assert result.lines[0].start == 1
+    assert result.lines[1].end == 3
