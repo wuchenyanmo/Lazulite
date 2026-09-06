@@ -21,6 +21,7 @@ from lazulite.lyrics.providers.netease import (
     candidate_from_netease_result,
     lyrics_from_netease_payload,
 )
+from lazulite.audio.io import read_audio_metadata
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -137,3 +138,12 @@ def test_netease_parser_keeps_aliases_and_associates_translation() -> None:
     assert candidate.match_score > 90
     assert lyrics is not None
     assert lyrics.translation_for("line-0") == "消失的飞机云"
+
+
+def test_audio_metadata_reads_search_fields_without_returning_raw_tags() -> None:
+    metadata = read_audio_metadata(Path(__file__).parent / "fixtures" / "夜奏花.m4a")
+
+    assert metadata.title == "夜奏花"
+    assert metadata.artist == "YURiKA"
+    assert metadata.duration == pytest.approx(353.003, abs=0.1)
+    assert not hasattr(metadata, "raw_tags")

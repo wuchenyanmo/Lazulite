@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,6 +13,22 @@ from numpy.typing import NDArray
 def _require_finite_time(value: float, field_name: str) -> None:
     if not isfinite(value):
         raise ValueError(f"{field_name} 必须是有限秒数")
+
+
+@dataclass(frozen=True, slots=True)
+class AudioMetadata:
+    """供歌词搜索使用的轻量文件元数据，不携带封面或完整 tag dump。"""
+
+    path: Path
+    title: str | None
+    artist: str | None
+    album: str | None
+    duration: float
+
+    def __post_init__(self) -> None:
+        _require_finite_time(self.duration, "duration")
+        if self.duration < 0:
+            raise ValueError("音频时长不能为负数")
 
 
 @dataclass(frozen=True, slots=True)
