@@ -3,5 +3,6 @@
 from .base import FetchedLyricCandidate, LyricProvider, SearchCandidate
 from .netease import NeteaseProvider
 from .qqmusic import QQMusicProvider
+from .lrclib import LRCLIBProvider
 
-__all__ = ["FetchedLyricCandidate", "LyricProvider", "NeteaseProvider", "QQMusicProvider", "SearchCandidate"]
+__all__ = ["FetchedLyricCandidate", "LRCLIBProvider", "LyricProvider", "NeteaseProvider", "QQMusicProvider", "SearchCandidate"]

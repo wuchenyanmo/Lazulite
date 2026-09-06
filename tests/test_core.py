@@ -23,6 +23,7 @@ from lazulite.lyrics.providers.netease import (
 )
 from lazulite.audio.io import decode_audio, read_audio_metadata
 from lazulite.lyrics.providers.qqmusic import candidate_from_qq_result, lyrics_from_qq_payload
+from lazulite.lyrics.providers.lrclib import lyrics_from_lrclib_payload
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -163,3 +164,9 @@ def test_qq_parser_supports_base64_lyrics() -> None:
     lyrics = lyrics_from_qq_payload({"code": 0, "lyric": "WzAwOjAxLjAwXea2iOWIpuOCi+mjnuihjOmdoumbsiJ9"})
     assert candidate.candidate_id == "abc"
     assert lyrics is not None
+
+
+def test_lrclib_parser_falls_back_to_plain_text() -> None:
+    lyrics = lyrics_from_lrclib_payload({"plainLyrics": "[ti:ignored]\n一行\n二行"})
+    assert lyrics is not None
+    assert [line.text for line in lyrics.document.lines] == ["一行", "二行"]
