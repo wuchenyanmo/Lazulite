@@ -17,6 +17,10 @@ from lazulite.lyrics.normalize import normalize_lyric_text
 from lazulite.lyrics.ttml import TtmlFormatError, read_ttml_for_alignment
 from lazulite.lyrics.search import SearchScoreFields, score_search_candidate
 from lazulite.lyrics.similarity import text_similarity
+from lazulite.lyrics.providers.netease import (
+    candidate_from_netease_result,
+    lyrics_from_netease_payload,
+)
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -108,3 +112,28 @@ def test_shared_similarity_and_search_score_handle_normalization_and_duration() 
     assert text_similarity("今日(きょう)、歌う", "今日 歌う") == 1.0
     assert score_search_candidate(title="鳥の詩", duration=180.0, fields=fields, artist="Lia") > 75
     assert score_search_candidate(title="鳥の詩", duration=205.1, fields=fields, artist="Lia") == 0.0
+
+
+def test_netease_parser_keeps_aliases_and_associates_translation() -> None:
+    candidate = candidate_from_netease_result(
+        {
+            "id": 7,
+            "name": "鳥の詩",
+            "alia": ["鸟之诗"],
+            "dt": 369_000,
+            "ar": [{"name": "Lia", "alia": ["lia"]}],
+            "al": {"name": "AIR", "tns": ["AIR 原声"]},
+        },
+        title="鳥の詩",
+        duration=369.0,
+        artist="Lia",
+        album="AIR",
+    )
+    lyrics = lyrics_from_netease_payload(
+        {"lrc": {"lyric": "[00:01.00]消える飛行機雲"}, "tlyric": {"lyric": "[00:01.00]消失的飞机云"}}
+    )
+
+    assert candidate.candidate_id == "7"
+    assert candidate.match_score > 90
+    assert lyrics is not None
+    assert lyrics.translation_for("line-0") == "消失的飞机云"
