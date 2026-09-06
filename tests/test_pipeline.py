@@ -13,6 +13,8 @@ from lazulite.transcription.base import (
     TranscriptionRequest,
 )
 from lazulite.transcription.run import transcribe_segments
+from lazulite.pipeline import AlignmentPipeline, PipelineConfig
+from lazulite.models.lyrics import LyricDocument, LyricLine
 
 
 class _RecordingBackend:
@@ -65,3 +67,11 @@ def test_file_cache_uses_deterministic_keys(tmp_path) -> None:
     cache.set_json(key, {"ok": True})
     assert cache.get_json(key) == {"ok": True}
     assert key == cache_key({"value": [1, 2], "stage": "test"})
+
+
+def test_pipeline_injects_backend_without_writing_audio():
+    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "audio")
+    backend = _RecordingBackend(); pipeline = AlignmentPipeline(transcriber=backend)
+    result = pipeline.run(audio, LyricDocument((LyricLine("L1", "window-0"),)), config=PipelineConfig(mode="dp", vocal=__import__("lazulite.audio.activity", fromlist=["VocalConfig"]).VocalConfig(min_segment_seconds=0.2)))
+    assert result.transcription is not None
+    assert audio.samples[0, 0] == 0.5

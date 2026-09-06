@@ -34,7 +34,8 @@ def analyze_vocals(audio: AudioBuffer, *, config: VocalConfig = VocalConfig()) -
         return VocalAnalysis(audio.source_id, (), ("no_vocal_evidence",))
     windows = np.lib.stride_tricks.sliding_window_view(mono, frame)[::hop]
     rms = np.sqrt(np.mean(windows * windows, axis=1))
-    low, high = np.percentile(rms, (5, 95)); activity = np.clip((rms - low) / max(high - low, 1e-8), 0, 1)
+    low, high = np.percentile(rms, (5, 95))
+    activity = np.ones_like(rms) if high > 1e-8 and high - low <= 1e-8 else np.clip((rms - low) / max(high - low, 1e-8), 0, 1)
     candidates: list[tuple[int, int]] = []
     for start, end in _intervals(activity >= config.enter_threshold):
         while start > 0 and activity[start - 1] >= config.keep_threshold: start -= 1
