@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Sequence
@@ -61,6 +61,14 @@ class QwenBackend:
             precision=config.precision,
         )
         self._export_index = 0
+
+    @property
+    def cache_identity(self) -> dict[str, object]:
+        """缓存键排除路径，保留固定 revision 和影响 generate 的参数。"""
+        config = asdict(self._config)
+        config["model_path"] = None
+        config["distribution_output_dir"] = str(self._config.distribution_output_dir) if self._config.distribution_output_dir else None
+        return {"backend": asdict(self.info), "config": config}
 
     @staticmethod
     def _audio_for_input(item: TranscriptionInput) -> np.ndarray:

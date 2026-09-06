@@ -2,24 +2,34 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Literal, Protocol
+from dataclasses import asdict, dataclass, replace
+from typing import Any, Literal, Mapping, Protocol
+import warnings
 
+from lazulite import __version__
 from lazulite.alignment.line import LineAlignmentConfig, align_lines
 from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.audio.activity import VocalConfig, analyze_vocals
 from lazulite.audio.io import resample_audio
+from lazulite.cache import FileCache, cache_key
 from lazulite.events import EventSink, ProgressEvent
-from lazulite.models.alignment import AlignedLyricLine, LineAlignmentResult
-from lazulite.models.audio import AudioBuffer, VocalAnalysis
+from lazulite.models.alignment import AlignedLyricLine, AlignmentAnchor, LineAlignmentResult
+from lazulite.models.audio import AudioBuffer, VocalAnalysis, VocalSegment
 from lazulite.models.lyrics import LyricDocument
-from lazulite.models.transcription import TranscriptionResult
+from lazulite.models.transcription import BackendInfo, TimedText, TranscriptionResult, TranscriptionSegment
 from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import transcribe_segments
+
+_CACHE_ALGORITHM_REVISION = "pipeline-result-v1"
 
 
 class Separator(Protocol):
     def separate(self, audio: AudioBuffer) -> AudioBuffer: ...
+
+
+class CacheIdentity(Protocol):
+    @property
+    def cache_identity(self) -> Mapping[str, object] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,13 +49,87 @@ class PipelineResult:
 
 
 class AlignmentPipeline:
-    def __init__(self, *, transcriber: Transcriber, separator: Separator | None = None, event_sink: EventSink | None = None) -> None:
-        self._transcriber = transcriber; self._separator = separator; self._event_sink = event_sink
+    def __init__(self, *, transcriber: Transcriber, separator: Separator | None = None, cache: FileCache | None = None, event_sink: EventSink | None = None) -> None:
+        self._transcriber = transcriber; self._separator = separator; self._cache = cache; self._event_sink = event_sink
 
     def _emit(self, stage: str, kind: str, message: str | None = None) -> None:
         if self._event_sink: self._event_sink(ProgressEvent(stage, kind, message=message))
 
+    @staticmethod
+    def _identity(resource: object) -> Mapping[str, object] | None:
+        value = getattr(resource, "cache_identity", None)
+        value = value() if callable(value) else value
+        return value if isinstance(value, Mapping) else None
+
+    def _cache_key(self, audio: AudioBuffer, document: LyricDocument, config: PipelineConfig) -> str | None:
+        if self._cache is None or not audio.source_id.startswith("sha256:"):
+            return None
+        transcriber = self._identity(self._transcriber)
+        separator = self._identity(self._separator) if self._separator is not None else {"kind": "none"}
+        # 外部后端没有声明完整有效参数时宁可不缓存，也不跨模型错误复用。
+        if transcriber is None or separator is None:
+            return None
+        return cache_key({
+            "stage": "pipeline-result",
+            "algorithm_revision": _CACHE_ALGORITHM_REVISION,
+            "lazulite_version": __version__,
+            "audio": {"source_id": audio.source_id, "sample_rate": audio.sample_rate, "shape": list(audio.samples.shape)},
+            "document": asdict(document),
+            "pipeline_config": asdict(config),
+            "transcriber": transcriber,
+            "separator": separator,
+        })
+
+    @staticmethod
+    def _serialize(result: PipelineResult) -> dict[str, Any]:
+        return {"schema": _CACHE_ALGORITHM_REVISION, "result": asdict(result)}
+
+    @staticmethod
+    def _deserialize(payload: Mapping[str, Any]) -> PipelineResult | None:
+        if payload.get("schema") != _CACHE_ALGORITHM_REVISION or not isinstance(payload.get("result"), Mapping):
+            return None
+        try:
+            result = payload["result"]
+            analysis_value = result["analysis"]
+            analysis = VocalAnalysis(
+                analysis_value["source_id"],
+                tuple(VocalSegment(**item) for item in analysis_value["segments"]),
+                tuple(analysis_value["diagnostics"]),
+            )
+            transcription_value = result["transcription"]
+            transcription = None
+            if transcription_value is not None:
+                backend = BackendInfo(**transcription_value["backend"])
+                transcription = TranscriptionResult(backend, tuple(
+                    TranscriptionSegment(
+                        source_segment_id=item["source_segment_id"], text=item["text"], language=item["language"],
+                        start=item["start"], end=item["end"], confidence=item["confidence"], confidence_kind=item["confidence_kind"],
+                        timed_text=tuple(TimedText(**unit) for unit in item["timed_text"]), backend_metadata=item["backend_metadata"],
+                    ) for item in transcription_value["segments"]
+                ))
+            alignment_value = result["alignment"]
+            alignment = LineAlignmentResult(
+                tuple(AlignedLyricLine(**item) for item in alignment_value["lines"]),
+                alignment_value["strategy"], alignment_value["reliable"],
+                tuple(AlignmentAnchor(**item) for item in alignment_value["anchors"]), tuple(alignment_value["diagnostics"]),
+            )
+            return PipelineResult(analysis, transcription, alignment)
+        except (KeyError, TypeError, ValueError) as error:
+            warnings.warn(f"缓存结果结构无效，忽略本次命中: {error}", RuntimeWarning)
+            return None
+
+    def _cache_result(self, key: str | None, result: PipelineResult) -> PipelineResult:
+        if key is not None and self._cache is not None:
+            self._cache.set_json(key, self._serialize(result))
+        return result
+
     def run(self, audio: AudioBuffer, document: LyricDocument, *, config: PipelineConfig = PipelineConfig()) -> PipelineResult:
+        key = self._cache_key(audio, document, config)
+        if key is not None and self._cache is not None:
+            cached = self._deserialize(self._cache.get_json(key) or {})
+            if cached is not None:
+                self._emit("pipeline", "completed", "cache_hit")
+                return cached
         self._emit("analysis", "started")
         vocals = self._separator.separate(audio) if self._separator else audio
         analysis = analyze_vocals(vocals, config=config.vocal)
@@ -62,7 +146,7 @@ class AlignmentPipeline:
                 ("no_vocal_evidence",),
             )
             self._emit("analysis", "completed", "no_vocal_evidence")
-            return PipelineResult(analysis, None, unresolved)
+            return self._cache_result(key, PipelineResult(analysis, None, unresolved))
         self._emit("transcription", "started")
         transcription = transcribe_segments(resample_audio(vocals, sample_rate=16_000, channels=1), analysis.segments, transcriber=self._transcriber, request=TranscriptionRequest(language=config.language, include_timing=self._transcriber.capabilities.timestamp_granularity != "none"))
         has_source_times = any(line.source_start is not None for line in document.lines)
@@ -72,4 +156,4 @@ class AlignmentPipeline:
             alignment = offset if offset.reliable else align_lines(document, transcription, analysis, config=config.line)
             if config.mode == "hybrid" and alignment.strategy == "dp": alignment = replace(alignment, strategy="hybrid")
         self._emit("alignment", "completed")
-        return PipelineResult(analysis, transcription, alignment)
+        return self._cache_result(key, PipelineResult(analysis, transcription, alignment))

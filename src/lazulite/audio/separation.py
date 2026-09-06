@@ -13,6 +13,7 @@ from .io import resample_audio
 class DemucsConfig:
     model_name: str = "htdemucs"
     device: str = "cuda"
+    model_revision: str | None = None
 
 
 class DemucsSeparator:
@@ -30,6 +31,18 @@ class DemucsSeparator:
         self._torch = torch; self._apply_model = apply_model
         self._model = get_model(self._config.model_name).to(self._config.device).eval()
         return self._model
+
+    @property
+    def cache_identity(self) -> dict[str, object] | None:
+        """未指定权重身份时不允许缓存分离后的自动化结果。"""
+        if not self._config.model_revision:
+            return None
+        return {
+            "separator": "demucs",
+            "model_name": self._config.model_name,
+            "model_revision": self._config.model_revision,
+            "device": self._config.device,
+        }
 
     def separate(self, audio: AudioBuffer) -> AudioBuffer:
         prepared = resample_audio(audio, sample_rate=44_100, channels=2)

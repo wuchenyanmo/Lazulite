@@ -45,6 +45,10 @@ class _RecordingBackend:
     def close(self) -> None:
         pass
 
+    @property
+    def cache_identity(self):
+        return {"backend": {"name": "fake", "revision": "test"}, "recipe": "test-v1"}
+
 
 def test_transcription_runner_splits_long_windows_without_changing_source_id() -> None:
     audio = AudioBuffer(np.zeros((1, 12_000), dtype=np.float32), 1_000, "audio")
@@ -88,3 +92,19 @@ def test_pipeline_keeps_all_lines_unresolved_when_no_vocals_are_detected() -> No
     assert result.transcription is None
     assert [line.line_id for line in result.alignment.lines] == ["L1", "L2"]
     assert all(line.timing_source == "unresolved" for line in result.alignment.lines)
+
+
+def test_pipeline_reuses_complete_result_only_for_a_content_addressed_cache_key(tmp_path) -> None:
+    audio = AudioBuffer(np.ones((1, 1_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
+    document = LyricDocument((LyricLine("L1", "window-0"),))
+    config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
+    cache = FileCache(tmp_path)
+    first = _RecordingBackend()
+    second = _RecordingBackend()
+
+    AlignmentPipeline(transcriber=first, cache=cache).run(audio, document, config=config)
+    cached = AlignmentPipeline(transcriber=second, cache=cache).run(audio, document, config=config)
+
+    assert first.inputs
+    assert second.inputs == ()
+    assert cached.alignment.lines[0].line_id == "L1"

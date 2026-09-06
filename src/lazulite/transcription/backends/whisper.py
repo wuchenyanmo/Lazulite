@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Sequence
@@ -58,6 +58,14 @@ class WhisperBackend:
         self._processor = AutoProcessor.from_pretrained(str(config.model_path))
         self.info = BackendInfo("whisper", config.model_id, config.revision, f"transformers {version('transformers')}; torch {torch.__version__}", config.precision)
         self._export_index = 0
+
+    @property
+    def cache_identity(self) -> dict[str, object]:
+        """缓存只依赖可审计的模型身份和实际生成参数，不依赖目录路径。"""
+        config = asdict(self._config)
+        config["model_path"] = None
+        config["distribution_output_dir"] = str(self._config.distribution_output_dir) if self._config.distribution_output_dir else None
+        return {"backend": asdict(self.info), "config": config}
 
     def _waveform(self, item: TranscriptionInput) -> np.ndarray:
         if item.audio.sample_rate != 16_000:
