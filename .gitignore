@@ -3,7 +3,8 @@
 .vscode
 model
 music-source/*
-test*
+# Historical generated outputs; keep the new tests/ visible to Git.
+test/
 debug-*/*
 
 # Byte-compiled / optimized / DLL files
