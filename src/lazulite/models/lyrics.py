@@ -25,6 +25,7 @@ class LyricLine:
     source_start: float | None = None
     source_end: float | None = None
     agent_id: str | None = None
+    singer: str | None = None
 
     def __post_init__(self) -> None:
         if not self.id:

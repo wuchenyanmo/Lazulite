@@ -11,6 +11,8 @@ import pytest
 from lazulite.models.audio import AudioBuffer, VocalSegment
 from lazulite.models.lyrics import LyricDocument, LyricLine, ReadingSpan
 from lazulite.models.transcription import TranscriptionSegment
+from lazulite.lyrics.lrc import read_lrc, with_translation, write_lrc
+from lazulite.lyrics.normalize import normalize_lyric_text
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
@@ -51,3 +53,18 @@ def test_missing_confidence_is_distinct_from_zero() -> None:
 
     assert missing.confidence is None
     assert zero.confidence == 0.0
+
+
+def test_lrc_parses_metadata_singer_and_translation_without_rewriting_original_text() -> None:
+    lrc = read_lrc("[ti:示例]\n[00:01.00]作词：作者\n[00:02.00]【合】今日(きょう)、歌う")
+    translated = with_translation(lrc, "[00:02.04]Today, we sing")
+
+    line = translated.document.lines[0]
+    assert lrc.metadata == (("ti", "示例"), ("作词", "作者"))
+    assert line.text == "今日(きょう)、歌う"
+    assert line.singer == "合"
+    assert normalize_lyric_text(line.text) == "今日 歌う"
+    assert translated.translation_for(line.id) == "Today, we sing"
+    assert "[00:02.00]今日(きょう)、歌う【Today, we sing】" in write_lrc(
+        translated, include_translations=True
+    )
