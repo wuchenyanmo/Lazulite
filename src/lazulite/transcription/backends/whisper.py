@@ -79,22 +79,25 @@ class WhisperBackend:
             return ()
         values = timestamps[0].detach().float().cpu().tolist()
         special = set(self._processor.tokenizer.all_special_ids)
-        pending = bytearray(); groups: list[tuple[str, int]] = []
+        pending = bytearray(); group_start: int | None = None; groups: list[tuple[str, int]] = []
         for step, token_id in enumerate(ids):
             if token_id in special:
                 continue
             token = self._processor.tokenizer.convert_ids_to_tokens(token_id)
             try:
+                if group_start is None:
+                    group_start = step
                 pending.extend(_BYTE_DECODER[character] for character in token)
                 text = pending.decode("utf-8")
             except (KeyError, UnicodeDecodeError):
                 continue
             if text:
-                groups.append((text, step))
-            pending.clear()
+                # 一个 Unicode 字符可能跨多个 BPE token；开始边界必须取首 token。
+                groups.append((text, group_start))
+                pending.clear(); group_start = None
         result: list[TimedText] = []
-        for index, (text, step) in enumerate(groups):
-            sequence_index = prefix + step
+        for index, (text, first_step) in enumerate(groups):
+            sequence_index = prefix + first_step
             start = values[sequence_index] if sequence_index < len(values) else None
             next_step = groups[index + 1][1] if index + 1 < len(groups) else None
             end = values[prefix + next_step] if next_step is not None and prefix + next_step < len(values) else None
