@@ -43,7 +43,7 @@ _BYTE_DECODER = _byte_decoder()
 
 
 class WhisperBackend:
-    capabilities = TranscriberCapabilities("subword", context=False, max_audio_seconds=30.0)
+    capabilities = TranscriberCapabilities("subword", context=True, max_audio_seconds=30.0)
 
     def __init__(self, config: WhisperConfig) -> None:
         try:
@@ -113,8 +113,13 @@ class WhisperBackend:
     def _one(self, item: TranscriptionInput, request: TranscriptionRequest) -> TranscriptionSegment:
         inputs = self._processor(self._waveform(item), sampling_rate=16_000, return_tensors="pt", return_attention_mask=True).to(self._config.device)
         inputs["input_features"] = inputs["input_features"].to(getattr(self._torch, self._config.precision))
+        if request.context and request.include_timing:
+            raise ValueError("Whisper prompt is unsupported with token timing")
+        prompt_kwargs = {}
+        if request.context:
+            prompt_kwargs["prompt_ids"] = self._processor.get_prompt_ids(request.context, return_tensors="pt").to(self._config.device)
         with self._torch.inference_mode():
-            output = self._model.generate(**inputs, language=request.language, task="transcribe", max_new_tokens=self._config.max_new_tokens, do_sample=False, return_token_timestamps=request.include_timing, return_dict_in_generate=True, output_scores=True, condition_on_prev_tokens=False)
+            output = self._model.generate(**inputs, **prompt_kwargs, language=request.language, task="transcribe", max_new_tokens=self._config.max_new_tokens, do_sample=False, return_token_timestamps=request.include_timing, return_dict_in_generate=True, output_scores=True, condition_on_prev_tokens=False)
         generation_scores = output["scores"]
         if not generation_scores:
             raise RuntimeError("Whisper generate 未返回 scores，不能伪造 token 概率")
@@ -124,12 +129,12 @@ class WhisperBackend:
         special = set(self._processor.tokenizer.all_special_ids)
         lexical_steps = [step for step, token_id in enumerate(ids) if token_id not in special]
         scores = extract_token_scores(logits, ids, distribution_kind="generation_processed", lexical_steps=lexical_steps, top_k=self._config.top_k)
-        metadata = scores.metadata(); metadata.update({"generated_ids": ids, "prefix_length": prefix, "body_generation_steps": lexical_steps})
+        metadata = scores.metadata(); metadata.update({"generated_ids": ids, "prefix_length": prefix, "body_generation_steps": lexical_steps, "request_context": request.context})
         if self._config.distribution_output_dir is not None:
             target = self._config.distribution_output_dir / f"{item.segment.id}-{self._export_index}.npz"; self._export_index += 1
             metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id, tokenizer_revision=self.info.revision))
         timestamps = output.get("token_timestamps")
-        text = self._processor.batch_decode(output["sequences"], skip_special_tokens=True)[0]
+        text = self._processor.batch_decode([ids], skip_special_tokens=True)[0]
         return TranscriptionSegment(item.segment.id, text, request.language, None, None, scores.confidence, "generation_token_geometric_mean" if scores.confidence is not None else None, self._timed_text(ids, prefix, timestamps, item), metadata)
 
     def transcribe(self, inputs: Sequence[TranscriptionInput], *, request: TranscriptionRequest) -> tuple[TranscriptionSegment, ...]:

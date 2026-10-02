@@ -115,7 +115,7 @@ def test_pipeline_keeps_all_lines_unresolved_when_no_vocals_are_detected() -> No
 
 
 def test_pipeline_reuses_complete_result_only_for_a_content_addressed_cache_key(tmp_path) -> None:
-    audio = AudioBuffer(np.ones((1, 1_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
+    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
     document = LyricDocument((LyricLine("L1", "window-0"),))
     config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
     cache = FileCache(tmp_path)
@@ -149,7 +149,7 @@ def test_hybrid_refinement_receives_the_dp_match_result(monkeypatch) -> None:
     received = []
     monkeypatch.setattr(pipeline_module, "align_lines", lambda *args, **kwargs: dp_result)
     monkeypatch.setattr(pipeline_module, "align_with_offset", lambda *args, **kwargs: received.append(kwargs["guidance"]) or refined)
-    audio = AudioBuffer(np.ones((1, 2_000), dtype=np.float32) * 0.5, 1_000, "audio")
+    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "audio")
 
     result = AlignmentPipeline(transcriber=_RecordingBackend()).run(
         audio,
@@ -162,7 +162,7 @@ def test_hybrid_refinement_receives_the_dp_match_result(monkeypatch) -> None:
 
 
 def test_pipeline_recomputes_when_cached_full_distribution_was_removed(tmp_path) -> None:
-    audio = AudioBuffer(np.ones((1, 1_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
+    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
     document = LyricDocument((LyricLine("L1", "window-0"),))
     config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
     cache = FileCache(tmp_path / "cache")
