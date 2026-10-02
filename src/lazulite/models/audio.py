@@ -92,6 +92,8 @@ class VocalAnalysis:
     source_id: str
     segments: tuple[VocalSegment, ...]
     diagnostics: tuple[str, ...] = ()
+    is_vocal: bool | None = None
+    vocal_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if not self.source_id:

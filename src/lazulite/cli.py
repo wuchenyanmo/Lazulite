@@ -145,7 +145,7 @@ def _run_align(arguments: argparse.Namespace) -> int:
             from .audio.separation import DemucsConfig, DemucsSeparator
             separator = DemucsSeparator(DemucsConfig(arguments.separator_model, arguments.separator_device))
         result = AlignmentPipeline(transcriber=backend, separator=separator).run(
-            decode_audio(arguments.audio),
+            decode_audio(arguments.audio, sample_rate=44_100, channels=2),
             read_ttml_for_alignment(arguments.lyrics),
             config=PipelineConfig(mode=arguments.mode, language=arguments.language),
         )

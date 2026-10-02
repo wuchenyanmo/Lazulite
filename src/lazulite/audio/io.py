@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 import subprocess
 from typing import Any
@@ -78,8 +79,19 @@ def decode_audio(
         raise ValueError("sample_rate 与 channels 必须为正数")
     path = Path(audio_path).expanduser().resolve()
     command = [
-        "ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", str(channels),
-        "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
+        "ffmpeg",
+        "-v",
+        "error",
+        "-i",
+        str(path),
+        "-vn",
+        "-ac",
+        str(channels),
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "f32le",
+        "pipe:1",
     ]
     try:
         completed = subprocess.run(command, check=True, capture_output=True)
@@ -92,23 +104,77 @@ def decode_audio(
     if values.size == 0 or values.size % channels:
         raise ValueError(f"FFmpeg 输出了无效的 PCM 数据: {path}")
     samples = values.reshape(-1, channels).T.copy()
-    return AudioBuffer(samples=samples, sample_rate=sample_rate, source_id=f"sha256:{_file_sha256(path)}")
+    return AudioBuffer(
+        samples=samples,
+        sample_rate=sample_rate,
+        source_id=f"sha256:{_file_sha256(path)}",
+    )
 
 
-def resample_audio(audio: AudioBuffer, *, sample_rate: int, channels: int | None = None) -> AudioBuffer:
-    """对内存音频做确定性线性重采样；模型输入的布局保持显式。"""
+def resample_audio(
+    audio: AudioBuffer, *, sample_rate: int, channels: int | None = None
+) -> AudioBuffer:
+    """对内存音频做FFmpeg 带限重采样；模型输入的布局保持显式。"""
     if sample_rate <= 0:
         raise ValueError("sample_rate 必须为正数")
     target_channels = channels if channels is not None else audio.samples.shape[0]
     if target_channels <= 0:
         raise ValueError("channels 必须为正数")
     source = audio.samples
-    if target_channels == 1: source = source.mean(axis=0, keepdims=True)
-    elif target_channels == 2 and source.shape[0] == 1: source = np.repeat(source, 2, axis=0)
-    elif target_channels != source.shape[0]: raise ValueError("不支持该声道数转换")
+    if target_channels == 1:
+        source = source.mean(axis=0, keepdims=True)
+    elif target_channels == 2 and source.shape[0] == 1:
+        source = np.repeat(source, 2, axis=0)
+    elif target_channels != source.shape[0]:
+        raise ValueError("不支持该声道数转换")
     if sample_rate == audio.sample_rate:
-        return AudioBuffer(source.astype(np.float32, copy=True), sample_rate, audio.source_id)
-    size = round(source.shape[1] * sample_rate / audio.sample_rate)
-    positions = np.linspace(0, source.shape[1] - 1, size, dtype=np.float64)
-    samples = np.vstack([np.interp(positions, np.arange(source.shape[1]), channel) for channel in source]).astype(np.float32)
+        return AudioBuffer(
+            source.astype(np.float32, copy=True), sample_rate, audio.source_id
+        )
+    if source.shape[1] == 0:
+        return AudioBuffer(
+            source.astype(np.float32, copy=True), sample_rate, audio.source_id
+        )
+    command = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-f",
+        "f32le",
+        "-ar",
+        str(audio.sample_rate),
+        "-ac",
+        str(target_channels),
+        "-i",
+        "pipe:0",
+        "-af",
+        f"aresample={sample_rate}:resampler=swr:filter_size=32:phase_shift=10:cutoff=0.97",
+        "-f",
+        "f32le",
+        "pipe:1",
+    ]
+    # Flush the finite filter even for clips shorter than its delay. Preserve sample
+    # zero and return ceil(duration * rate), matching the duration contract.
+    target_length = math.ceil(source.shape[1] * sample_rate / audio.sample_rate)
+    padding = math.ceil(64 * max(1, audio.sample_rate / sample_rate))
+    padded = np.pad(source, ((0, 0), (0, padding)))
+    try:
+        output = subprocess.run(
+            command,
+            input=padded.T.astype("<f4").tobytes(),
+            capture_output=True,
+            check=True,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("未找到 FFmpeg，无法重采样") from error
+    except subprocess.CalledProcessError as error:
+        raise ValueError(error.stderr.decode("utf-8", errors="replace")) from error
+    samples = (
+        np.frombuffer(output.stdout, dtype="<f4")
+        .reshape(-1, target_channels)
+        .T[:, :target_length]
+        .copy()
+    )
+    if samples.shape[1] != target_length:
+        raise ValueError("FFmpeg 返回了不完整的重采样音频")
     return AudioBuffer(samples, sample_rate, audio.source_id)

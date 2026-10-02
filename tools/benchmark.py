@@ -45,6 +45,9 @@ def _metrics(reference: LyricDocument, alignment) -> dict[str, object]:
     return {
         "line_count": len(reference.lines),
         "complete_coverage": complete / max(len(reference.lines), 1),
+        "matched_coverage": sum(bool(item.source_segment_ids) for item in alignment.lines) / max(len(reference.lines), 1),
+        "start_evaluated_lines": len(start_errors),
+        "end_evaluated_lines": len(end_errors),
         "unresolved_lines": sum(item.start is None for item in alignment.lines),
         "start": _metric_summary(start_errors),
         "end": _metric_summary(end_errors),
@@ -86,7 +89,7 @@ def main() -> int:
                 continue
             reference = read_ttml_for_alignment(ttml)
             input_document = _evaluation_document(reference, mode=arguments.mode, source_shift=arguments.source_shift)
-            audio = decode_audio(source)
+            audio = decode_audio(source, sample_rate=44_100, channels=2)
             import torch
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
