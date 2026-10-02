@@ -34,6 +34,7 @@ class AlignedLyricLine:
     timing_source: TimingSource
     source_segment_ids: tuple[str, ...]
     issues: tuple[str, ...] = ()
+    matched_text: str | None = None
 
     def __post_init__(self) -> None:
         if not self.line_id:

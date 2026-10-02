@@ -13,10 +13,28 @@ def text_similarity(left: str | None, right: str | None) -> float:
     normalized_right = normalize_lyric_text(right)
     if not normalized_left or not normalized_right:
         return 0.0
-    return SequenceMatcher(None, normalized_left, normalized_right).ratio()
+    ratio = SequenceMatcher(None, normalized_left, normalized_right).ratio()
+
+    def grams(text, size):
+        return (
+            {text[i : i + size] for i in range(len(text) - size + 1)}
+            if len(text) >= size
+            else {text}
+        )
+
+    ua, ub = grams(normalized_left, 1), grams(normalized_right, 1)
+    ba, bb = grams(normalized_left, 2), grams(normalized_right, 2)
+    return (
+        0.40 * ratio
+        + 0.22 * len(ua & ub) / max(len(ua | ub), 1)
+        + 0.26 * len(ba & bb) / max(len(ba | bb), 1)
+        + 0.12 * min(len(ua & ub) / max(len(ua), 1), len(ua & ub) / max(len(ub), 1))
+    )
 
 
-def prefix_similarity(left: str | None, right: str | None, *, prefix_chars: int = 12) -> float:
+def prefix_similarity(
+    left: str | None, right: str | None, *, prefix_chars: int = 12
+) -> float:
     """比较歌词前缀，用于重复副歌的锚点质量诊断。"""
     if prefix_chars < 1:
         raise ValueError("prefix_chars 必须为正数")
@@ -25,4 +43,6 @@ def prefix_similarity(left: str | None, right: str | None, *, prefix_chars: int 
     if not normalized_left or not normalized_right:
         return 0.0
     size = min(len(normalized_left), len(normalized_right), prefix_chars)
-    return SequenceMatcher(None, normalized_left[:size], normalized_right[:size]).ratio()
+    return SequenceMatcher(
+        None, normalized_left[:size], normalized_right[:size]
+    ).ratio()

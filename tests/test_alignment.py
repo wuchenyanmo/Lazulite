@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from lazulite.alignment.line import align_lines
-from lazulite.alignment.offset import align_with_offset
+from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.models.audio import VocalAnalysis, VocalSegment
 from lazulite.models.lyrics import LyricDocument, LyricLine
 from lazulite.models.transcription import BackendInfo, TranscriptionResult, TranscriptionSegment
@@ -21,7 +21,7 @@ def test_offset_alignment_uses_core_start_without_missing_confidence_filter():
     analysis = VocalAnalysis("audio", (VocalSegment("s1", None, 11, 14, 11.5, 13.5, 1, 0), VocalSegment("s2", None, 21, 24, 21.5, 23.5, 1, 0)))
     document = LyricDocument((LyricLine("L1", "一", 1, 3), LyricLine("L2", "二", 11, 13)))
     transcript = TranscriptionResult(BackendInfo("fake", "fake", "r", "v", "float32"), (TranscriptionSegment("s1", "一", "ja", None, None, None, None, (), {}), TranscriptionSegment("s2", "二", "ja", None, None, None, None, (), {})))
-    result = align_with_offset(document, transcript, analysis)
+    result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_anchors=2))
     assert result.reliable
     assert result.lines[0].start == 11.5
 
@@ -54,7 +54,7 @@ def test_offset_alignment_uses_consistent_offsets_per_vocal_section():
         BackendInfo("fake", "fake", "r", "v", "float32"),
         tuple(TranscriptionSegment(segment, text, "zh", None, None, None, None, (), {}) for segment, text in (("s1", "甲"), ("s2", "乙"), ("s3", "丙"), ("s4", "丁"))),
     )
-    result = align_with_offset(document, transcript, analysis)
+    result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_merged_section_chunks=2))
 
     assert result.reliable
     assert [line.start for line in result.lines] == [10, 20, 50, 60]
