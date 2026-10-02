@@ -130,9 +130,10 @@ class NeteaseProvider:
             response.raise_for_status()
             payload: dict[str, Any] = response.json()
         except (RequestException, ValueError) as error:
-            warnings.warn(f"网易云搜索请求失败，已跳过该来源: {error}", RuntimeWarning)
-            return []
+            raise RuntimeError("网易云搜索请求失败") from error
 
+        if payload.get("code", 200) != 200:
+            raise RuntimeError("网易云搜索返回失败状态")
         result = payload.get("result") or {}
         songs = result.get("songs") if isinstance(result, dict) else []
         candidates: list[SearchCandidate] = []

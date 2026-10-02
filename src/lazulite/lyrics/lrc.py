@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from collections import Counter
 
 from lazulite.models.lyrics import LyricDocument, LyricLine
 
@@ -20,16 +21,75 @@ _SINGER_DASH = re.compile(
     r"^(?P<label>[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff/&+・ ]{1,24})\s*[-~]\s*(?P<body>.+)$"
 )
 
-_DEFAULT_METADATA_KEYS = {"ti", "ar", "al", "by", "offset", "la", "id", "length", "re", "ve"}
+_DEFAULT_METADATA_KEYS = {
+    "ti",
+    "ar",
+    "al",
+    "by",
+    "offset",
+    "la",
+    "id",
+    "length",
+    "re",
+    "ve",
+}
 _METADATA_LABELS = {
-    "作词", "作詞", "词", "詞", "作曲", "曲", "编曲", "編曲", "作词作曲", "词曲",
-    "演唱", "歌手", "原唱", "vocal", "artist", "title", "标题", "標題", "album",
-    "专辑", "專輯", "制作", "製作", "producer", "lyrics", "music", "composer",
-    "lyricist", "chorus", "和声", "和聲", "mix", "mixed", "master", "录音", "錄音",
+    "作词",
+    "作詞",
+    "词",
+    "詞",
+    "作曲",
+    "曲",
+    "编曲",
+    "編曲",
+    "作词作曲",
+    "词曲",
+    "演唱",
+    "歌手",
+    "原唱",
+    "vocal",
+    "artist",
+    "title",
+    "标题",
+    "標題",
+    "album",
+    "专辑",
+    "專輯",
+    "制作",
+    "製作",
+    "producer",
+    "lyrics",
+    "music",
+    "composer",
+    "lyricist",
+    "chorus",
+    "和声",
+    "和聲",
+    "mix",
+    "mixed",
+    "master",
+    "录音",
+    "錄音",
 }
 _SINGER_ROLE_WORDS = {
-    "男", "女", "合", "和", "齐", "齊", "全", "全员", "全員", "duet", "solo",
-    "chorus", "rap", "lead", "main", "vocal", "和声", "和聲",
+    "男",
+    "女",
+    "合",
+    "和",
+    "齐",
+    "齊",
+    "全",
+    "全员",
+    "全員",
+    "duet",
+    "solo",
+    "chorus",
+    "rap",
+    "lead",
+    "main",
+    "vocal",
+    "和声",
+    "和聲",
 }
 
 
@@ -65,15 +125,19 @@ def _split_key_value(text: str) -> tuple[str, str] | None:
     return (key, value) if key and value else None
 
 
-def _metadata_from_timestamp_line(timestamp: float, text: str) -> tuple[str, str] | None:
+def _metadata_from_timestamp_line(
+    timestamp: float, text: str
+) -> tuple[str, str] | None:
     """只把明确的头部信息当元数据，避免吞掉正常歌词。"""
     key_value = _split_key_value(text)
     if key_value is None:
-        return None
+        return (
+            ("meta", text)
+            if text.strip().casefold() in {"instrumental", "inst", "纯音乐", "純音樂"}
+            else None
+        )
     key, value = key_value
     if _looks_like_metadata_label(key):
-        return key, value
-    if timestamp <= 20 and len(key) <= 12 and len(value) <= 40:
         return key, value
     return None
 
@@ -81,14 +145,12 @@ def _metadata_from_timestamp_line(timestamp: float, text: str) -> tuple[str, str
 def _looks_like_singer_label(label: str) -> bool:
     clean = normalize_text(label)
     compact = normalize_text(label, keep_spaces=False)
-    if not clean or len(clean) > 24 or _looks_like_metadata_label(clean):
+    if not clean or len(clean) > 24:
         return False
     if compact.lower() in {word.lower() for word in _SINGER_ROLE_WORDS}:
         return True
-    return bool(
-        re.fullmatch(r"[A-Za-z0-9/&+]+", compact)
-        or re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9/&+・ ]+", clean)
-    )
+    # Unambiguous role letters/numbers; arbitrary prose before a colon is retained.
+    return bool(re.fullmatch(r"[A-Z0-9](?:[/&+][A-Z0-9])*", compact))
 
 
 def _extract_singer_marker(text: str) -> tuple[str | None, str]:
@@ -109,7 +171,8 @@ def read_plain_text(text: str, *, language: str | None = None) -> LyricDocument:
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if line:
-            lines.append(LyricLine(id=f"line-{len(lines)}", text=line))
+            singer, body = _extract_singer_marker(line)
+            lines.append(LyricLine(id=f"line-{len(lines)}", text=body, singer=singer))
     return LyricDocument(lines=tuple(lines), language=language)
 
 
@@ -125,7 +188,9 @@ def read_lrc(text: str, *, language: str | None = None) -> LrcDocument:
         metadata_match = _METADATA.match(line)
         if metadata_match is not None:
             key, value = metadata_match.groups()
-            metadata.append((normalize_text(key, keep_spaces=False).lower(), normalize_text(value)))
+            metadata.append(
+                (normalize_text(key, keep_spaces=False).lower(), normalize_text(value))
+            )
             continue
         lyric_match = _TIMESTAMP.match(line)
         if lyric_match is None:
@@ -154,26 +219,66 @@ def read_lrc(text: str, *, language: str | None = None) -> LrcDocument:
 
 def with_translation(document: LrcDocument, translation_lrc: str) -> LrcDocument:
     """按最近真实时间关联翻译；无时间的翻译按行序关联。"""
-    translation = read_lrc(translation_lrc, language=document.document.language)
     target_lines = document.document.lines
-    source_lines = translation.document.lines
-    if not target_lines or not source_lines:
+    if not target_lines:
         return document
-
-    mappings: list[tuple[str, str]] = []
-    timed_target = all(line.source_start is not None for line in target_lines)
-    timed_source = all(line.source_start is not None for line in source_lines)
-    if timed_target and timed_source:
-        for source in source_lines:
-            assert source.source_start is not None
-            matched = min(
-                target_lines,
-                key=lambda target: abs((target.source_start or 0.0) - source.source_start),
+    source_lines = []
+    for raw in translation_lrc.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        match = _TIMESTAMP.match(raw)
+        if match:
+            timestamp, text = match.groups()
+            source_lines.append((_parse_timestamp(timestamp), text))
+        elif not _METADATA.match(raw):
+            source_lines.append((None, raw))
+    mappings = {}
+    for index, (timestamp, text) in enumerate(source_lines):
+        if timestamp is not None and all(
+            line.source_start is not None for line in target_lines
+        ):
+            target = min(
+                target_lines, key=lambda line: abs(line.source_start - timestamp)
             )
-            mappings.append((matched.id, source.text))
-    else:
-        mappings.extend((target.id, source.text) for target, source in zip(target_lines, source_lines))
-    return LrcDocument(document.document, document.metadata, tuple(mappings))
+        elif index < len(target_lines):
+            target = target_lines[index]
+        else:
+            break
+        mappings[target.id] = text
+    return replace(document, translations=tuple(mappings.items()))
+
+
+def clean_translation(document: LrcDocument, *, threshold: float = 0.8) -> LrcDocument:
+    """Explicitly remove a majority pair of translation brackets; never automatic."""
+    if not 0 <= threshold <= 1:
+        raise ValueError("threshold must be in [0, 1]")
+    pairs = {
+        "{}",
+        "｛｝",
+        "[]",
+        "［］",
+        "()",
+        "（）",
+        "「」",
+        "『』",
+        "【】",
+        "〖〗",
+        "〔〕",
+    }
+    texts = [text for _, text in document.translations if len(text) > 1]
+    if not texts:
+        return document
+    pair, count = Counter(text[0] + text[-1] for text in texts).most_common(1)[0]
+    if pair not in pairs or count < threshold * len(texts):
+        return document
+    return replace(
+        document,
+        translations=tuple(
+            (key, text[1:-1] if len(text) > 1 and text[0] + text[-1] == pair else text)
+            for key, text in document.translations
+        ),
+    )
 
 
 def write_lrc(
@@ -192,8 +297,10 @@ def write_lrc(
             raise ValueError("当前歌词缺少真实时间戳，无法导出为 LRC")
         minute = int(line.source_start // 60)
         second = line.source_start % 60
-        text = line.text
+        text = f"{line.singer}: {line.text}" if line.singer else line.text
         if include_translations and (translation := translations.get(line.id)):
-            text = f"{text}{translation_brackets[0]}{translation}{translation_brackets[1]}"
+            text = (
+                f"{text}{translation_brackets[0]}{translation}{translation_brackets[1]}"
+            )
         result.append(f"[{minute:02d}:{second:05.2f}]{text}")
     return "\n".join(result)

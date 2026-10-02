@@ -4,7 +4,7 @@ import base64
 import warnings
 import requests
 from requests.exceptions import RequestException
-from lazulite.lyrics.lrc import LrcDocument, read_lrc
+from lazulite.lyrics.lrc import read_lrc
 from lazulite.lyrics.normalize import KUGOU_ARTIST_SEPARATORS, split_text
 from lazulite.lyrics.search import SearchScoreFields, score_search_candidate
 from .base import SearchCandidate
@@ -12,10 +12,11 @@ from .base import SearchCandidate
 _HEADERS={"User-Agent":"Mozilla/5.0","Referer":"https://www.kugou.com/"}
 _SEARCH="https://mobilecdn.kugou.com/api/v3/search/song"; _LYRIC_SEARCH="https://lyrics.kugou.com/search"; _DOWNLOAD="https://lyrics.kugou.com/download"
 
-def _get(session, url, params):
+def _get(session, url, params, *, strict=False):
     try:
         response=session.get(url,params=params,headers=_HEADERS,timeout=(5,10)); response.raise_for_status(); return response.json()
     except (RequestException,ValueError) as error:
+        if strict: raise RuntimeError("酷狗搜索请求失败") from error
         warnings.warn(f"酷狗请求失败，已跳过当前请求: {error}",RuntimeWarning); return {}
 
 def candidate_from_kugou_result(item, *, title, duration, artist, album):
@@ -29,7 +30,8 @@ class KugouProvider:
     source_name="kugou"; priority=100
     def __init__(self,*,session=None): self._session=session or requests.Session()
     def search(self,title,duration,artist=None,album=None,score_title=None,score_artist=None,score_album=None):
-        payload=_get(self._session,_SEARCH,{"format":"json","keyword":title,"page":1,"pagesize":20,"showtype":1})
+        payload=_get(self._session,_SEARCH,{"format":"json","keyword":title,"page":1,"pagesize":20,"showtype":1},strict=True)
+        if payload.get("status",1) != 1: raise RuntimeError("酷狗搜索返回失败状态")
         return sorted((candidate_from_kugou_result(item,title=score_title or title,duration=duration,artist=score_artist if score_artist is not None else artist,album=score_album if score_album is not None else album) for item in ((payload.get("data") or {}).get("info") or []) if item.get("hash")),key=lambda item:item.match_score,reverse=True)
     def fetch(self,candidate):
         query=f"{candidate.artist} - {candidate.title}" if candidate.artist else candidate.title

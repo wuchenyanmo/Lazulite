@@ -98,7 +98,7 @@ def test_lrc_parses_metadata_singer_and_translation_without_rewriting_original_t
     assert line.singer == "合"
     assert normalize_lyric_text(line.text) == "今日 歌う"
     assert translated.translation_for(line.id) == "Today, we sing"
-    assert "[00:02.00]今日(きょう)、歌う【Today, we sing】" in write_lrc(
+    assert "[00:02.00]合: 今日(きょう)、歌う【Today, we sing】" in write_lrc(
         translated, include_translations=True
     )
 

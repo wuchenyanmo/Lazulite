@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any
 
 import requests
 from requests.exceptions import RequestException
@@ -47,19 +46,23 @@ class LRCLIBProvider:
 
     def search(self, title: str, duration: float, artist: str | None = None, album: str | None = None, score_title: str | None = None, score_artist: str | None = None, score_album: str | None = None) -> list[SearchCandidate]:
         variants: list[dict[str, str]] = []
-        for track, performer, record in ((title, artist or "", album or ""), (normalize_search_text(title), normalize_search_text(artist), normalize_search_text(album)), (normalize_search_text(title), normalize_search_text(artist), "")):
+        for track, performer, record in ((title, artist or "", album or ""), (normalize_search_text(title), normalize_search_text(artist), normalize_search_text(album)), (normalize_search_text(title), normalize_search_text(artist), ""), (title, artist or "", "")):
             item = {"track_name": clean_text(track), "artist_name": clean_text(performer), "album_name": clean_text(record)}
             if item["track_name"] and item not in variants: variants.append(item)
         results: dict[str, dict[str, object]] = {}; last_error: Exception | None = None
+        succeeded = False
         for parameters in variants:
             try:
                 response = self._session.get(_SEARCH_URL, params=parameters, headers=_HEADERS, timeout=(5, 10)); response.raise_for_status(); payload = response.json()
             except (RequestException, ValueError) as error:
                 last_error = error; continue
+            if not isinstance(payload, list):
+                last_error = ValueError("LRCLIB 搜索返回非列表载荷"); continue
+            succeeded = True
             for item in payload or []:
                 if isinstance(item, dict) and (item_id := clean_text(item.get("id"))): results.setdefault(item_id, item)
-        if not results and last_error:
-            warnings.warn(f"LRCLIB 搜索请求失败，已跳过该来源: {last_error}", RuntimeWarning)
+        if not succeeded and last_error:
+            raise RuntimeError("LRCLIB 所有搜索请求失败") from last_error
         return sorted((candidate_from_lrclib_result(item, title=score_title or title, duration=duration, artist=score_artist if score_artist is not None else artist, album=score_album if score_album is not None else album) for item in results.values()), key=lambda candidate: candidate.match_score, reverse=True)
 
     def fetch(self, candidate: SearchCandidate) -> LrcDocument | None:

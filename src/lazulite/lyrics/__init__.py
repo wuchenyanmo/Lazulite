@@ -1,6 +1,6 @@
 """歌词输入、规范化与搜索能力。"""
 
-from .lrc import LrcDocument, read_lrc, read_plain_text, with_translation, write_lrc
+from .lrc import clean_translation, LrcDocument, read_lrc, read_plain_text, with_translation, write_lrc
 from .normalize import normalize_lyric_text, normalize_text
 from .similarity import prefix_similarity, text_similarity
 from .service import (
@@ -16,6 +16,7 @@ __all__ = [
     "LrcDocument",
     "RankedLyricCandidate",
     "build_default_providers",
+    "clean_translation",
     "fetch_lyrics",
     "normalize_lyric_text",
     "normalize_text",
