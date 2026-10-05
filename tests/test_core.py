@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -103,24 +104,27 @@ def test_lrc_parses_metadata_singer_and_translation_without_rewriting_original_t
     )
 
 
-@pytest.mark.parametrize(
-    ("filename", "line_count", "first_id", "first_text"),
-    [
-        ("POWDER SNOW (Live Ver.).ttml", 35, "L4", "粉雪が空から"),
-        ("夜奏花.ttml", 33, "L4", "夜空を見上げて"),
-        ("鳥の詩.ttml", 42, "L4", "消える飛行機雲 僕たちは見送った"),
-    ],
-)
-def test_ttml_projects_fixture_lines_without_serializing_the_source(
-    filename: str, line_count: int, first_id: str, first_text: str
-) -> None:
-    fixture = Path(__file__).parent / "fixtures" / filename
+def test_ttml_projects_fixture_lines_without_serializing_the_source(tmp_path: Path) -> None:
+    fixture = tmp_path / "synthetic.ttml"
+    fixture.write_text('<tt xmlns="http://www.w3.org/ns/ttml"><body><div>'
+                       '<p key="L4" begin="1" end="2"><span begin="1" end="2">テスト</span></p>'
+                       '<p key="L5" begin="3" end="4">二行目</p>'
+                       '</div></body></tt>')
     document = read_ttml_for_alignment(fixture)
+    assert len(document.lines) == 2
+    assert document.lines[0].id == "L4"
+    assert document.lines[0].text == "テスト"
+    assert document.lines[0].source_start == 1.0
 
-    assert len(document.lines) == line_count
-    assert document.lines[0].id == first_id
-    assert document.lines[0].text == first_text
-    assert document.lines[0].source_start is not None
+
+@pytest.fixture
+def synthetic_audio(tmp_path: Path) -> Path:
+    source = tmp_path / "generated.m4a"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-c:a", "aac", "-metadata", "title=夜奏花", "-metadata", "artist=YURiKA", str(source),
+    ], check=True)
+    return source
 
 
 def test_ttml_rejects_unsupported_frame_time(tmp_path: Path) -> None:
@@ -164,21 +168,21 @@ def test_netease_parser_keeps_aliases_and_associates_translation() -> None:
     assert lyrics.translation_for("line-0") == "消失的飞机云"
 
 
-def test_audio_metadata_reads_search_fields_without_returning_raw_tags() -> None:
-    metadata = read_audio_metadata(Path(__file__).parent / "fixtures" / "夜奏花.m4a")
+def test_audio_metadata_reads_search_fields_without_returning_raw_tags(synthetic_audio: Path) -> None:
+    metadata = read_audio_metadata(synthetic_audio)
 
     assert metadata.title == "夜奏花"
     assert metadata.artist == "YURiKA"
-    assert metadata.duration == pytest.approx(353.003, abs=0.1)
+    assert metadata.duration == pytest.approx(2.0, abs=0.1)
     assert not hasattr(metadata, "raw_tags")
 
 
-def test_ffmpeg_decode_uses_explicit_channel_sample_layout() -> None:
-    audio = decode_audio(Path(__file__).parent / "fixtures" / "夜奏花.m4a", sample_rate=8_000)
+def test_ffmpeg_decode_uses_explicit_channel_sample_layout(synthetic_audio: Path) -> None:
+    audio = decode_audio(synthetic_audio, sample_rate=8_000)
 
     assert audio.samples.dtype == np.float32
     assert audio.samples.shape[0] == 1
-    assert audio.duration == pytest.approx(353.003, abs=0.1)
+    assert audio.duration == pytest.approx(2.0, abs=0.1)
 
 
 def test_activity_analysis_marks_core_and_padding_separately() -> None:
@@ -208,8 +212,8 @@ def test_lrclib_parser_falls_back_to_plain_text() -> None:
     assert [line.text for line in lyrics.document.lines] == ["一行", "二行"]
 
 
-def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: Path) -> None:
-    metadata = read_audio_metadata(Path(__file__).parent / "fixtures" / "夜奏花.m4a")
+def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: Path, synthetic_audio: Path) -> None:
+    metadata = read_audio_metadata(synthetic_audio)
     provider = _FakeProvider()
     candidates = search_lyrics(metadata, providers=(provider,))
     fetched = fetch_lyrics(candidates, providers=(provider,))

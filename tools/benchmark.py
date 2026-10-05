@@ -1,4 +1,4 @@
-"""对三首固定素材运行整曲自动行对齐并输出精简指标。"""
+"""对显式提供的本地素材运行整曲自动行对齐并输出精简指标。"""
 
 from __future__ import annotations
 
@@ -67,8 +67,8 @@ def _evaluation_document(reference: LyricDocument, *, mode: str, source_shift: f
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="运行 Lazulite 三首整曲 benchmark")
-    parser.add_argument("--fixture-dir", type=Path, default=Path("tests/fixtures"))
+    parser = argparse.ArgumentParser(description="运行 Lazulite 自备素材整曲 benchmark")
+    parser.add_argument("--fixture-dir", type=Path, required=True)
     parser.add_argument("--backend", choices=("qwen", "whisper"), required=True)
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--revision", required=True)

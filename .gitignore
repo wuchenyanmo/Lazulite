@@ -223,3 +223,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local copyrighted benchmark media must not be distributed.
+/tests/fixtures/*.m4a
+/tests/fixtures/*.mp3
+/tests/fixtures/*.flac
