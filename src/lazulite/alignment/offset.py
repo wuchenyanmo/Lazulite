@@ -218,7 +218,8 @@ def _estimate(
 
 def _anchor(candidate: _Candidate) -> AlignmentAnchor:
     return AlignmentAnchor(
-        candidate.line_id, candidate.segment.id, candidate.offset, candidate.score
+        candidate.line_id, candidate.segment.id, candidate.offset, candidate.score,
+        candidate.transcription.request_window.request_id if candidate.transcription.request_window is not None else None
     )
 
 
@@ -270,9 +271,11 @@ def _guided_candidates(document, transcription, analysis, guidance, config):
             item
             for source in match.source_segment_ids
             for item in transcripts.get(source, ())
+            if not match.source_request_ids or item.request_window is not None and item.request_window.request_id in match.source_request_ids
         ]
         if segment is None or not items:
             continue
+        segment = items[0].request_window or segment
         text = match.matched_text or " ".join(item.text for item in items)
         if any(not transcription_quality(item,item.request_window or segment,config.evidence).usable for item in items) or (
             segment.presence is not None and segment.presence < 0.28
@@ -472,6 +475,7 @@ def align_with_offset(
                 () if index in known_sections else ("inferred_section_offset",),
                 match.matched_text if match is not None else None,
                 "source_offset", "source_offset" if end is not None else None,
+                match.source_request_ids if match is not None else (),
             )
         )
     complete = all(line.start is not None for line in lines)

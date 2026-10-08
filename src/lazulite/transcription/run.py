@@ -106,7 +106,7 @@ def transcribe_segments(
     if not inputs:
         return TranscriptionResult(transcriber.info, ())
     from lazulite.events import checkpoint
-    identity=getattr(transcriber,'cache_identity',None)
+    identity=getattr(transcriber,'cache_identity',None) if cache is not None else None
     identity=identity() if callable(identity) else identity
     pcm=pcm_identity(audio) if cache is not None and identity is not None else None
     completed=0
@@ -121,11 +121,11 @@ def transcribe_segments(
             return values
         values=[]
         for item in batch:
-            key=cache_key({'schema':'transcription-request-v1','pcm':pcm,'window':asdict(item.segment),
+            key=cache_key({'schema':'transcription-request-v2','pcm':pcm,'window':asdict(item.segment),
                            'backend':identity,'request':asdict(request)})
             entry=cache.get_json(key)
             value=None
-            if entry is not None and entry.get('schema')=='transcription-request-v1':
+            if entry is not None and entry.get('schema')=='transcription-request-v2':
                 try:
                     value=transcription_segment_from_dict(entry['value'])
                     target=value.backend_metadata.get('distribution_file')
@@ -138,7 +138,7 @@ def transcribe_segments(
                 if len(output)!=1:raise ValueError('one result per request required')
                 value=_bind(item,output[0],request,request.context)
                 checkpoint(cancel)
-                cache.set_json(key,{'schema':'transcription-request-v1','value':asdict(value)})
+                cache.set_json(key,{'schema':'transcription-request-v2','value':asdict(value)})
             values.append(value);completed+=1
             checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
         return tuple(values)

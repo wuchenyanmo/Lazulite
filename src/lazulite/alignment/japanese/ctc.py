@@ -36,7 +36,7 @@ def decode(logp, targets, blank=29, *, anchors=(), max_decode_memory_bytes=DEFAU
         raise NoFeasiblePath('empty frames or targets')
     S = 2 * len(targets) + 1
     # Includes backpointers, score/work vectors, and returned frame path; lp stays in caller dtype.
-    required = T*S + S*80 + T*8
+    required = T*S + S*128 + T*17
     if required > max_decode_memory_bytes:
         raise MemoryError(f'CTC requires {required} bytes, budget {max_decode_memory_bytes}')
     if T < len(targets) + np.count_nonzero(targets[1:] == targets[:-1]):

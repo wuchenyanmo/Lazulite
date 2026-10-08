@@ -76,6 +76,9 @@ def _project_paragraph(element,line_id):
             language='ja' if reading else 'unknown'
         units.append(JapaneseUnit(f'{line_id}:unit:{len(units)}',(start,len(text)),reading,language,source))
     def walk(node):
+        for name in ('begin','end','dur'):
+            value=_attribute(node,name)
+            if value is not None:_parse_time(value,field=name)
         if _excluded(node) or _ruby(node) in {'text','textContainer','delimiter'}:return
         if _ruby(node)=='container':
             bases=[c for c in node.iter() if c is not node and (_ruby(c)=='base' or _local_name(c.tag)=='rb')]
@@ -113,6 +116,9 @@ def _read(path):
     def visit(node):
         if _excluded(node):return
         tag=_local_name(node.tag)
+        for name in ('begin','end','dur'):
+            value=_attribute(node,name)
+            if value is not None:_parse_time(value,field=name)
         if _attribute(node,'timeContainer') not in {None,'par'}:
             raise TtmlFormatError('不支持相对时间容器')
         if tag in {'tt','body','div'} and any(_attribute(node,k) is not None for k in ('begin','end','dur')):

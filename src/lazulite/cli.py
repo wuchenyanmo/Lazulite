@@ -27,6 +27,7 @@ def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = Fals
     if forced:
         return
     parser.add_argument("--device", default="cuda", help="Whisper 使用的 Torch 设备")
+    parser.add_argument("--precision", choices=("float16", "float32"), help="默认 CPU float32，CUDA float16")
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Whisper 生成上限")
     parser.add_argument("--top-k", type=int, default=5, help="每个生成 token 保留的候选数")
     parser.add_argument("--full-distributions", type=Path, help="按分片导出完整 logprob NPZ 的目录")
@@ -113,6 +114,7 @@ def _build_transcriber(arguments: argparse.Namespace):
             model_id=arguments.model_id or "openai/whisper-large-v3",
             revision=arguments.revision,
             device=arguments.device,
+            precision=arguments.precision or ("float32" if arguments.device=="cpu" else "float16"),
             top_k=arguments.top_k,
             max_new_tokens=arguments.max_new_tokens,
             distribution_output_dir=distributions,
@@ -161,14 +163,14 @@ def _run_japanese(arguments: argparse.Namespace) -> int:
 
 
 def _run_prepare(arguments: argparse.Namespace) -> int:
-    from .audio.io import decode_audio
+    from .audio.io import decode_audio, decode_native_audio
     from .audio.preparation import prepare_vocals, prepare_existing_vocals, write_prepared
     if (arguments.audio is None) == (arguments.vocals is None):
         raise ValueError("必须且只能提供原曲 audio 或 --vocals 完整人声")
     if arguments.vocals is not None:
         if arguments.original_id is None or arguments.original_duration is None:
             raise ValueError("导入人声必须提供 --original-id 和 --original-duration")
-        prepared = prepare_existing_vocals(decode_audio(arguments.vocals, sample_rate=44100, channels=2),
+        prepared = prepare_existing_vocals(decode_native_audio(arguments.vocals),
             original_id=arguments.original_id, original_duration=arguments.original_duration)
     else:
         if arguments.original_id is not None or arguments.original_duration is not None:
@@ -293,6 +295,11 @@ def main(argv: list[str] | None = None) -> int:
     """运行命令；库异常保留原因，CLI 仅将其转为简洁的非零退出。"""
     arguments = build_parser().parse_args(argv)
     try:
+        output=getattr(arguments,'output',None)
+        if output is not None:
+            sources=[getattr(arguments,name,None) for name in ('audio','vocals','prepared','targets','ttml','lyrics','text')]
+            if any(isinstance(source,Path) and source.resolve()==output.resolve() for source in sources):
+                raise ValueError("结果文件不能覆盖输入音频、manifest 或歌词")
         return _HANDLERS[(arguments.command, getattr(arguments, "lyrics_command", None))](arguments)
     except (KeyboardInterrupt, SystemExit):
         raise

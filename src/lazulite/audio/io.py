@@ -178,3 +178,20 @@ def resample_audio(
     if samples.shape[1] != target_length:
         raise ValueError("FFmpeg 返回了不完整的重采样音频")
     return AudioBuffer(samples, sample_rate, audio.source_id)
+
+
+def decode_native_audio(audio_path: str | Path) -> AudioBuffer:
+    """Explicit stem import preserves the file's decoded sample rate and channels."""
+    import json
+    path=Path(audio_path).expanduser().resolve()
+    try:
+        probe=subprocess.run(['ffprobe','-v','error','-select_streams','a:0','-show_entries',
+                              'stream=sample_rate,channels','-of','json',str(path)],check=True,capture_output=True)
+        streams=json.loads(probe.stdout)['streams']
+        if len(streams)!=1:raise ValueError('one selected audio stream required')
+        rate,channels=int(streams[0]['sample_rate']),int(streams[0]['channels'])
+    except FileNotFoundError as error:
+        raise RuntimeError('未找到 FFprobe，无法确认人声文件布局') from error
+    except (subprocess.CalledProcessError,KeyError,ValueError,TypeError) as error:
+        raise ValueError('无法确认人声文件采样率和声道') from error
+    return decode_audio(path,sample_rate=rate,channels=channels)

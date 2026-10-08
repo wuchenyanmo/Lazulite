@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass, replace
 import numpy as np
 from lazulite.audio.concat import concatenate_cores
 from lazulite.cache import cache_key
-from lazulite.events import checkpoint
+from lazulite.events import checkpoint, ProgressEvent
 from lazulite.models.audio import PreparedVocals
 from lazulite.models.japanese import (
     Endpoint, Timing, JapaneseAlignmentRequest, JapaneseAlignmentResult, JapaneseUnitResult, JapaneseIssue,
@@ -124,6 +124,8 @@ def _result(request,units,execution,calibration,issues=()):
     status='complete' if full==len(units) and units else 'partial' if full or single else 'unresolved'
     return JapaneseAlignmentResult(units,status,tuple(lines),{'total':len(units),'raw_complete':raw,'proposed_complete':full,
         'single_endpoint':single,'unresolved':len(units)-full-single,'derived':derived,
+        'profile_derived':sum(any(e is not None and e.source=='profile_hold' for e in (u.raw_timing.start,u.raw_timing.end)) for u in units),
+        'completion_derived':sum(u.proposed_timing != u.raw_timing and any(e is not None for e in (u.proposed_timing.start,u.proposed_timing.end)) for u in units),
         'empty_targets':sum(not u.model_text for u in units)},calibration,execution,tuple(issues))
 
 
@@ -133,7 +135,7 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
     prepared.__post_init__()
     checkpoint(cancel,event_sink,'prepare')
     texts,tokens,ranges,problems=_profile(request)
-    execution={'route':'japanese','profile':'ja-hepburn/2','ctc':CTC_VERSION,'config':asdict(config),
+    execution={'adoption_policy':'proposed_endpoints_only; null_means_no_new_suggestion','route':'japanese','profile':'ja-hepburn/2','ctc':CTC_VERSION,'config':asdict(config),
                'pcm_id':prepared.pcm_id,'original_id':prepared.original_id,'segment_source':prepared.segment_source,
                'auto_conflict':prepared.segment_source=='manual' and prepared.analysis.is_vocal is False,
                'request_id':cache_key(asdict(request)), 'input':asdict(request), 'score_definition':'sum of frame log probabilities plus one-time entry penalties'}
@@ -152,12 +154,15 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
         identity=getattr(backend,'cache_identity',None)
         identity=identity() if callable(identity) else identity
         execution['backend']=identity
-        acoustic_key=cache_key({'pcm':prepared.pcm_id,'pieces':execution['pieces'],'backend':identity,'algorithm':ACOUSTIC_VERSION}) if identity is not None else None
+        acoustic_key=cache_key({'pcm':prepared.pcm_id,'pieces':execution['pieces'],'backend':identity,'algorithm':ACOUSTIC_VERSION,
+                                'resampling':'mean-stereo;ffmpeg-swr32-phase10-cutoff097-pad64-ceil-v1'}) if identity is not None else None
         lp=cache.get_array(acoustic_key) if cache is not None and acoustic_key is not None else None
         if lp is None:
             lp=backend.emissions(concat.audio,cancel=cancel,event_sink=event_sink)
             if cache is not None and acoustic_key is not None:
                 cache.set_array(acoustic_key,lp)
+        if lp.shape != (max(0,(concat.audio.samples.shape[1]-400)//320+1),32):
+            raise ValueError('acoustic artifact frame/vocabulary shape mismatch')
         execution['acoustic_id']=acoustic_key
         try:
             decode_key=cache_key({'stage':'japanese-decode-v1','acoustic':acoustic_key,
@@ -205,5 +210,6 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
         units=complete_units(request,units,concat,prepared.original_duration)
         execution['completion']=COMPLETION_VERSION
     issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in problems.values()) else []
-    checkpoint(cancel,event_sink,'completed')
+    checkpoint(cancel)
+    if event_sink is not None:event_sink(ProgressEvent('japanese','completed'))
     return _result(request,units,execution,calibration,issues)

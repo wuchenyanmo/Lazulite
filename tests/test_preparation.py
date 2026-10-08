@@ -73,3 +73,13 @@ def test_array_cache_rejects_missing_corrupt_and_unpublished_files(tmp_path):
     assert cache.get_array('a') is None
     path.unlink()
     assert cache.get_array('a') is None
+
+
+def test_external_file_import_preserves_native_rate_channels_and_pcm(tmp_path):
+    from scipy.io.wavfile import write
+    from lazulite.audio.io import decode_native_audio
+    samples=np.linspace(-.75,.75,22050,dtype=np.float32)
+    p=tmp_path/'mono.wav';write(p,22050,samples)
+    audio=decode_native_audio(p)
+    assert audio.sample_rate==22050 and audio.samples.shape==(1,22050)
+    np.testing.assert_array_equal(audio.samples[0],samples)

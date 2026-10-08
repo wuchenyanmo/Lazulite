@@ -34,7 +34,7 @@ from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
 from lazulite.transcription.evidence import eligible_for_transcription
 
-_CACHE_ALGORITHM_REVISION = "pipeline-result-v5-coverage"
+_CACHE_ALGORITHM_REVISION = "pipeline-result-v6-request-anchors"
 
 
 class Separator(Protocol):
@@ -366,7 +366,7 @@ class AlignmentPipeline:
                 combined = transcription.segments + additional.segments
                 transcription = TranscriptionResult(
                     transcription.backend,
-                    tuple(sorted(combined, key=lambda s: order[s.source_segment_id])),
+                    tuple(sorted(combined, key=lambda s: (s.request_window.start,s.request_window.sequence) if s.request_window is not None else (analysis.segments[order[s.source_segment_id]].start,0))),
                 )
         else:
             transcription = transcribe(all_segments, timing)

@@ -60,6 +60,7 @@ class AlignmentAnchor:
     source_segment_id: str
     offset: float
     weight: float | None = None
+    request_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.line_id or not self.source_segment_id:

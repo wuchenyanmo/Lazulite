@@ -6,6 +6,7 @@
 - 通过 Demucs 分离人声、分析声学活动并生成转写窗口。
 - 使用 Whisper 或 Qwen3-ASR（0.6B / 1.7B）转写，输出 token 概率、top-k 和可选完整分布。
 - 读取 LRC、文本与 TTML 歌词投影，生成行级时间候选及来源诊断。
+- 独立日语路线：core 拼接、固定 NextFire、全局 CTC、可选行首校准与有来源的端点建议。
 - 使用实验性 Qwen forced aligner，将确认文本映射到字符或词级时间。
 
 ## 安装
@@ -19,7 +20,8 @@ python -m pip install .
 按需安装模型能力，例如：
 
 ```bash
-python -m pip install -c constraints.txt '.[whisper,qwen,vocal,forced-qwen]'
+python -m pip install -c constraints.txt '.[whisper,japanese,vocal]'
+# Qwen 相关能力按需另装 qwen / forced-qwen extra
 ```
 
 模型命令使用本地权重目录和对应的固定 revision 或权重 SHA256。CUDA Torch 安装来源按部署环境选择。
@@ -44,7 +46,7 @@ lazulite forced-align clip.wav confirmed.txt \
   --revision REVISION --language ja --output fine.json
 ```
 
-`align` 默认使用 Demucs，已分离的人声可加 `--without-separation`。转写和行对齐命令可加 `--full-distributions DIR` 导出完整 logprob NPZ。公开时间采用整曲绝对秒，结果标注模型时间、声学窗口或插值来源，供后续人工复核。
+`align` 原曲入口使用 Demucs；已有完整人声先显式导入 `prepare-vocals --vocals`，再通过 `--prepared` 复用。转写和行对齐命令可加 `--full-distributions DIR` 导出完整 logprob NPZ。公开时间采用整曲绝对秒，结果标注模型时间、声学窗口或插值来源，供后续人工复核。
 
 ## Python API
 
@@ -68,7 +70,7 @@ python -m pytest
 python -m build
 ```
 
-整曲评估方法和结果见 [基准记录](docs/benchmark.md)，接口约定与模型实测入口见 [重构说明](docs/refactoring.md)。
+当前模块与接口见 [架构说明](docs/architecture.md)。`docs/benchmark.md` 与 `docs/refactoring.md` 保留历史身份，不代表 0.2.0 本轮验收。
 
 ### 共享人声准备
 

@@ -92,7 +92,9 @@ def _timing(
     units = tuple(unit for item in evidence for unit in item.transcription.timed_text)
     starts = [unit.start for unit in units if unit.start is not None]
     if starts:
-        return min(starts), max((u.end for u in units if u.end is not None), default=None), "model_units", ()
+        start=min(starts)
+        end=max((u.end for u in units if u.end is not None and u.end>start), default=None)
+        return start,end,"model_units",()
     issues = ["coarse_timing"]
     if any(item.transcription.confidence is None for item in evidence):
         issues.append("missing_model_confidence")

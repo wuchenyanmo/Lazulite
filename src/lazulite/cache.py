@@ -23,7 +23,8 @@ class FileCache:
     def get_json(self, key: str) -> dict[str, Any] | None:
         path = self.root / f"{key}.json"
         try:
-            return json.loads(path.read_text("utf-8"))
+            value=json.loads(path.read_text("utf-8"))
+            return value if isinstance(value,dict) else None
         except FileNotFoundError:
             return None
         except json.JSONDecodeError:
