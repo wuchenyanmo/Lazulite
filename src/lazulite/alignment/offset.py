@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from statistics import median
 from collections import Counter
 from lazulite.lyrics.normalize import normalize_lyric_text
-from lazulite.transcription.evidence import quality
-from .line import align_lines
+from lazulite.transcription.evidence import quality, transcription_quality, EvidenceConfig
+from .line import align_lines, LineAlignmentConfig
+from lazulite.transcription.timing import organize_timing
 
 from lazulite.lyrics.similarity import prefix_similarity, text_similarity
 from lazulite.models.alignment import (
@@ -22,6 +23,7 @@ from lazulite.models.transcription import TranscriptionResult, TranscriptionSegm
 
 @dataclass(frozen=True, slots=True)
 class OffsetAlignmentConfig:
+    evidence: EvidenceConfig = EvidenceConfig()
     minimum_similarity: float = 0.50
     minimum_prefix_similarity: float = 0.68
     minimum_anchors: int = 3
@@ -93,11 +95,13 @@ def _candidate_matrix(
     )
     rows: list[tuple[_Candidate | None, ...]] = []
     for item in transcription.segments:
-        segment = segments.get(item.source_segment_id)
+        segment = item.request_window or segments.get(item.source_segment_id)
         if (
             segment is None
             or not item.text.strip()
-            or not quality(item.text, segment).usable
+            or segment.core_start is None
+            or "duplicate_padding" in item.issues
+            or not transcription_quality(item, segment, config.evidence).usable
             or (segment.presence is not None and segment.presence < 0.28)
         ):
             continue
@@ -270,7 +274,7 @@ def _guided_candidates(document, transcription, analysis, guidance, config):
         if segment is None or not items:
             continue
         text = match.matched_text or " ".join(item.text for item in items)
-        if not quality(text, segment).usable or (
+        if any(not transcription_quality(item,item.request_window or segment,config.evidence).usable for item in items) or (
             segment.presence is not None and segment.presence < 0.28
         ):
             continue
@@ -309,6 +313,7 @@ def align_with_offset(
     guidance: LineAlignmentResult | None = None,
 ) -> LineAlignmentResult:
     """估计偏移并按声学 section 分配；可用 DP 匹配限制重排锚点。"""
+    transcription=organize_timing(transcription,analysis)
     source_lines = [
         (index, line)
         for index, line in enumerate(document.lines)
@@ -335,7 +340,7 @@ def align_with_offset(
     guidance = (
         guidance
         if guidance is not None
-        else align_lines(document, transcription, analysis)
+        else align_lines(document, transcription, analysis, config=LineAlignmentConfig(evidence=config.evidence))
     )
     matrix = _candidate_matrix(document, transcription, analysis, config, None)
     unguided = _select_monotonic(matrix)
@@ -466,13 +471,14 @@ def align_with_offset(
                 source_ids,
                 () if index in known_sections else ("inferred_section_offset",),
                 match.matched_text if match is not None else None,
+                "source_offset", "source_offset" if end is not None else None,
             )
         )
     complete = all(line.start is not None for line in lines)
     return LineAlignmentResult(
         lines=tuple(lines),
         strategy="offset",
-        reliable=complete,
+        offset_accepted=complete,
         anchors=tuple(_anchor(item) for item in reliable_candidates),
         diagnostics=() if complete else ("unreliable_section",),
     )

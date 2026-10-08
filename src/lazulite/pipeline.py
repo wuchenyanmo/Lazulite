@@ -34,7 +34,7 @@ from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
 from lazulite.transcription.evidence import eligible_for_transcription
 
-_CACHE_ALGORITHM_REVISION = "pipeline-result-v4-request-evidence"
+_CACHE_ALGORITHM_REVISION = "pipeline-result-v5-coverage"
 
 
 class Separator(Protocol):
@@ -173,13 +173,14 @@ class AlignmentPipeline:
                         **{
                             **item,
                             "source_segment_ids": tuple(item["source_segment_ids"]),
-                            "issues": tuple(item.get("issues", ())),
+                            "issues": tuple(item["issues"]),
+                            "source_request_ids":tuple(item["source_request_ids"]),
                         }
                     )
                     for item in alignment_value["lines"]
                 ),
                 alignment_value["strategy"],
-                alignment_value["reliable"],
+                alignment_value["offset_accepted"],
                 tuple(AlignmentAnchor(**item) for item in alignment_value["anchors"]),
                 tuple(alignment_value["diagnostics"]),
             )
@@ -337,7 +338,7 @@ class AlignmentPipeline:
             offset = align_with_offset(
                 document, transcription, analysis, config=config.offset
             )
-            if config.mode == "offset" or offset.reliable:
+            if config.mode == "offset" or offset.offset_accepted:
                 self._emit("transcription", "completed")
                 self._emit("alignment", "completed")
                 return self._cache_result(
@@ -380,7 +381,7 @@ class AlignmentPipeline:
             )
             alignment = (
                 replace(refined, strategy="hybrid")
-                if refined.reliable
+                if refined.offset_accepted
                 else replace(
                     alignment,
                     diagnostics=alignment.diagnostics

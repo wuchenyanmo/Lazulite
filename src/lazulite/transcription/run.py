@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
-from .evidence import quality, repetition, eligible_for_transcription
+from .evidence import transcription_quality, EvidenceConfig, repetition, eligible_for_transcription
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
 from lazulite.models.transcription import TranscriptionResult, RequestWindow
@@ -16,6 +16,7 @@ from .base import Transcriber, TranscriptionInput, TranscriptionRequest
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionConfig:
+    evidence: EvidenceConfig = EvidenceConfig()
     prompt_mode: Literal["none", "previous", "hint", "hybrid"] = "previous"
     lyric_hint: str | None = None
     max_prompt_chars: int = 180
@@ -118,7 +119,7 @@ def transcribe_segments(
                 raise ValueError('backend must return one result per request window')
             segment=_bind(item,result[0],effective_request,prompt)
             output.append(segment)
-            if quality(segment.text,item.segment).risk < .42:
+            if transcription_quality(segment,item.segment,config.evidence).risk < .42:
                 history.append(repetition(segment.text)[1])
     else:
         output = transcriber.transcribe(
@@ -127,4 +128,5 @@ def transcribe_segments(
         if len(output)!=len(inputs):
             raise ValueError('backend must return one ordered result per request window')
         output=tuple(_bind(item,result,effective_request) for item,result in zip(inputs,output))
-    return TranscriptionResult(backend=transcriber.info,segments=tuple(output))
+    from .timing import organize_timing
+    return organize_timing(TranscriptionResult(backend=transcriber.info,segments=tuple(output)))

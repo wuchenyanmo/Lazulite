@@ -153,7 +153,7 @@ def test_actual_asr_input_is_main_vocal(monkeypatch):
     np.testing.assert_allclose(backend.calls[0][0][0].audio.samples[0], expected)
 
 
-def test_nonuniform_multiline_uses_real_units_and_unknown_end():
+def test_nonuniform_multiline_uses_real_units_and_local_acoustic_end():
     units = (
         TimedText("aaaa", 1, 2, "word", "model"),
         TimedText("bbbb", 7, None, "word", "model"),
@@ -165,7 +165,7 @@ def test_nonuniform_multiline_uses_real_units_and_unknown_end():
     )
     assert [(l.start, l.end, l.timing_source) for l in result.lines] == [
         (1, 2, "model_units"),
-        (7, None, "model_units"),
+        (7, 10, "model_units"),
     ]
     assert [l.matched_text for l in result.lines] == ["aaaa", "bbbb"]
 
@@ -185,9 +185,9 @@ def test_default_two_anchors_are_insufficient_and_zero_offset_is_valid():
         replace(doc, lines=doc.lines[:2]),
         replace(trans, segments=trans.segments[:2]),
         replace(analysis, segments=analysis.segments[:2]),
-    ).reliable
+    ).offset_accepted
     result = align_with_offset(doc, trans, analysis)
-    assert result.reliable and all(a.offset == 0 for a in result.anchors)
+    assert result.offset_accepted and all(a.offset == 0 for a in result.anchors)
 
 
 def test_quality_preserves_unknown_confidence_and_rejects_repetition():
@@ -434,7 +434,7 @@ def test_dp_section_membership_overrides_anchor_midpoints():
         guidance=guidance,
         config=OffsetAlignmentConfig(minimum_merged_section_chunks=2),
     )
-    assert result.reliable
+    assert result.offset_accepted
     assert [line.start - source for line, source in zip(result.lines, sources)] == [
         2,
         2,
@@ -458,7 +458,7 @@ def test_guided_multiline_anchors_use_each_lines_onset():
     )
     trans = TranscriptionResult(INFO, (transcript(0, "aaaa bbbb cccc", units),))
     result = align_with_offset(doc, trans, VocalAnalysis("x", (segment(0),)))
-    assert result.reliable
+    assert result.offset_accepted
     assert [line.start for line in result.lines] == [2, 5, 8]
     assert [a.offset for a in result.anchors] == [2, 2, 2]
 

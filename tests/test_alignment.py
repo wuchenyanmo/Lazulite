@@ -22,7 +22,7 @@ def test_offset_alignment_uses_core_start_without_missing_confidence_filter():
     document = LyricDocument((LyricLine("L1", "一", 1, 3), LyricLine("L2", "二", 11, 13)))
     transcript = TranscriptionResult(BackendInfo("fake", "fake", "r", "v", "float32"), (TranscriptionSegment("s1", "一", "ja", None, None, None, None, (), {}), TranscriptionSegment("s2", "二", "ja", None, None, None, None, (), {})))
     result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_anchors=2))
-    assert result.reliable
+    assert result.offset_accepted
     assert result.lines[0].start == 11.5
 
 
@@ -56,7 +56,7 @@ def test_offset_alignment_uses_consistent_offsets_per_vocal_section():
     )
     result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_merged_section_chunks=2))
 
-    assert result.reliable
+    assert result.offset_accepted
     assert [line.start for line in result.lines] == [10, 20, 50, 60]
     assert {anchor.line_id for anchor in result.anchors} == {"L1", "L2", "L3", "L4"}
 
@@ -77,3 +77,42 @@ def test_frozen_generic_dp_regression_snapshot_keeps_every_line_traceable():
     ]
 
     assert actual == fixture["expected"]
+
+
+def test_whisper_probability_policy_distinguishes_low_tokens_and_missing_summary():
+    from dataclasses import replace
+    from lazulite.models.transcription import ProbabilitySummary,TranscriptionSegment
+    from lazulite.transcription.evidence import transcription_quality,EvidenceConfig
+    item=TranscriptionSegment('s','short lyric',None,None,None,None,None,(),{})
+    uniform=replace(item,probability=ProbabilitySummary(.5,.5,0,10))
+    low=replace(item,probability=ProbabilitySummary(.5,0,.5,10))
+    config=EvidenceConfig('whisper-lexical-v1')
+    assert transcription_quality(low,config=config).risk>transcription_quality(uniform,config=config).risk
+    assert transcription_quality(item,config=config)==transcription_quality(item)
+    assert transcription_quality(low)==transcription_quality(uniform)
+
+
+def test_window_end_completion_caps_rest_and_preserves_repeated_chorus():
+    from lazulite.models.transcription import TranscriptionSegment,TranscriptionResult,BackendInfo,RequestWindow,TimedText
+    from lazulite.transcription.timing import organize_timing
+    def item(i,start,end,core_end,onset):
+        return TranscriptionSegment('s'+str(i),'repeat',None,None,None,None,None,
+            (TimedText('repeat',onset,None,'word','model'),),{'raw_token_timestamps':[0,0]},
+            RequestWindow(str(i),'s'+str(i),start,end,start,core_end))
+    info=BackendInfo('test','m','r','v','f32')
+    result=organize_timing(TranscriptionResult(info,(item(0,0,2,1.5,1),item(1,2,5,4,3))))
+    assert result.segments[0].timed_text[0].end==1.5
+    assert result.segments[0].timed_text[0].end_source=='acoustic_core'
+    assert all('duplicate_padding' not in s.issues for s in result.segments)
+    assert result.segments[0].backend_metadata['raw_token_timestamps']==[0,0]
+    result=organize_timing(TranscriptionResult(info,(item(0,0,2,2,1.2),item(1,1,3,3,1.2))))
+    assert 'duplicate_padding' in result.segments[1].issues
+
+
+def test_line_coverage_is_not_a_reliability_promise():
+    from lazulite.models.alignment import AlignedLyricLine,LineAlignmentResult
+    result=LineAlignmentResult((AlignedLyricLine('a',1,None,.9,1,'model_units',('s',)),
+        AlignedLyricLine('b',None,None,None,None,'unresolved',())), 'dp',False,())
+    assert result.status=='partial'
+    assert result.coverage=={'total':2,'matched':1,'complete':0,'single_endpoint':1,'unresolved':1}
+    assert not hasattr(result,'reliable')

@@ -83,3 +83,28 @@ def eligible_for_transcription(segment: VocalSegment) -> bool:
     return (
         segment.presence is None or segment.presence >= 0.20
     ) and segment.end - segment.start >= 0.80
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceConfig:
+    policy: str = 'generic'
+
+    def __post_init__(self):
+        if self.policy not in {'generic','whisper-lexical-v1'}:
+            raise ValueError('unknown evidence policy')
+
+
+def transcription_quality(item, segment=None, config=EvidenceConfig()):
+    """Shared DP/offset/history calculation. Missing summaries add no probability risk."""
+    base=quality(item.text,segment)
+    summary=item.probability
+    if config.policy=='generic' or summary is None or summary.definition!='lexical_generation_probabilities-v1':
+        return base
+    components=dict(base.components)
+    components.update({
+        'mean_probability':_clip(1-summary.mean),
+        'minimum_probability':_clip(((.45-summary.minimum)/.35)**1.6) if summary.minimum<.45 else 0.,
+        'low_probability_fraction':_clip(((summary.low_fraction-.10)/.50)**1.4) if summary.low_fraction>.10 else 0.,
+    })
+    values=sorted(components.values(),reverse=True)
+    return QualityEvidence(base.repeat,base.density,sum(w*v for w,v in zip((.5,.3,.2),values)),tuple(components.items()))

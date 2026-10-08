@@ -35,6 +35,9 @@ class AlignedLyricLine:
     source_segment_ids: tuple[str, ...]
     issues: tuple[str, ...] = ()
     matched_text: str | None = None
+    start_source: str | None = None
+    end_source: str | None = None
+    source_request_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.line_id:
@@ -71,9 +74,26 @@ class AlignmentAnchor:
 class LineAlignmentResult:
     lines: tuple[AlignedLyricLine, ...]
     strategy: str
-    reliable: bool
+    offset_accepted: bool
     anchors: tuple[AlignmentAnchor, ...]
     diagnostics: tuple[str, ...] = ()
+
+    @property
+    def coverage(self):
+        complete=sum(l.start is not None and l.end is not None and l.start<l.end for l in self.lines)
+        single=sum((l.start is None)!=(l.end is None) for l in self.lines)
+        return {'total':len(self.lines),'matched':sum(bool(l.source_segment_ids) for l in self.lines),
+                'complete':complete,'single_endpoint':single,'unresolved':len(self.lines)-complete-single}
+
+    @property
+    def status(self):
+        c=self.coverage
+        return 'complete' if c['total'] and c['complete']==c['total'] else 'partial' if c['complete'] or c['single_endpoint'] else 'unresolved'
+
+    @property
+    def issue_counts(self):
+        from collections import Counter
+        return dict(Counter(issue for line in self.lines for issue in line.issues))
 
 
 @dataclass(frozen=True, slots=True)

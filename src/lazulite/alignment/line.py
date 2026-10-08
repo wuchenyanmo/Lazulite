@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from lazulite.lyrics.similarity import text_similarity
 from lazulite.lyrics.normalize import normalize_lyric_text
-from lazulite.transcription.evidence import quality, comparable_confidence
+from lazulite.transcription.evidence import transcription_quality, EvidenceConfig, comparable_confidence
 from lazulite.models.alignment import AlignedLyricLine, LineAlignmentResult
 from lazulite.models.audio import VocalAnalysis, VocalSegment
 from lazulite.models.lyrics import LyricDocument
-from lazulite.models.transcription import TranscriptionResult, TranscriptionSegment
+from lazulite.models.transcription import TranscriptionResult, TranscriptionSegment, TimedText
+from lazulite.transcription.timing import organize_timing
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,7 @@ class AlignmentEvidence:
 
 @dataclass(frozen=True, slots=True)
 class LineAlignmentConfig:
+    evidence: EvidenceConfig = EvidenceConfig()
     minimum_similarity: float = 0.08
     skip_line_penalty: float = 0.34
     skip_evidence_penalty: float = 0.24
@@ -40,9 +42,10 @@ def _evidence(
 ) -> tuple[AlignmentEvidence, ...]:
     by_id = {segment.id: segment for segment in analysis.segments}
     return tuple(
-        AlignmentEvidence(by_id[item.source_segment_id], item)
+        AlignmentEvidence(item.request_window or by_id[item.source_segment_id], item)
         for item in transcription.segments
-        if item.source_segment_id in by_id and item.text.strip()
+        if item.source_segment_id in by_id and item.text.strip() and "duplicate_padding" not in item.issues
+        and (item.request_window is None or item.request_window.core_start is not None)
     )
 
 
@@ -50,7 +53,7 @@ def _merge_penalty(line_count: int, evidence_count: int) -> float:
     return 0.05 * max(0, line_count - 1) + 0.04 * max(0, evidence_count - 1)
 
 
-def _score(lines: tuple[str, ...], evidence: tuple[AlignmentEvidence, ...]) -> float:
+def _score(lines: tuple[str, ...], evidence: tuple[AlignmentEvidence, ...], policy=EvidenceConfig()) -> float:
     value = 1.55 * text_similarity(
         "\n".join(lines), "\n".join(item.transcription.text for item in evidence)
     )
@@ -75,7 +78,7 @@ def _score(lines: tuple[str, ...], evidence: tuple[AlignmentEvidence, ...]) -> f
         value += 0.16 * sum(confidences) / len(confidences)
     value -= (
         0.40
-        * sum(quality(item.transcription.text, item.segment).risk for item in evidence)
+        * sum(transcription_quality(item.transcription, item.segment, policy).risk for item in evidence)
         / len(evidence)
     )
     return value - _merge_penalty(len(lines), len(evidence))
@@ -89,7 +92,7 @@ def _timing(
     units = tuple(unit for item in evidence for unit in item.transcription.timed_text)
     starts = [unit.start for unit in units if unit.start is not None]
     if starts:
-        return min(starts), units[-1].end if units else None, "model_units", ()
+        return min(starts), max((u.end for u in units if u.end is not None), default=None), "model_units", ()
     issues = ["coarse_timing"]
     if any(item.transcription.confidence is None for item in evidence):
         issues.append("missing_model_confidence")
@@ -122,14 +125,17 @@ def _interpolated_timing(
 
 def _boundary_split(lines, evidence, config):
     """Search monotonic spans of real timed text, retaining trim/skip penalties."""
-    if len(lines) < 2 or any(not item.transcription.timed_text for item in evidence):
+    if len(lines) < 2:
         return None
-    entries = [
-        (unit, item.segment.id)
-        for item in evidence
-        for unit in item.transcription.timed_text
-        if unit.text.strip() and unit.start is not None
-    ]
+    entries=[]
+    for item in evidence:
+        valid=[u for u in item.transcription.timed_text if u.text.strip() and u.start is not None]
+        if valid:
+            entries.extend((u,item.segment.id) for u in valid)
+        else:
+            # A coarse block stays one segment-granularity item, never fabricated tokens.
+            entries.append((TimedText(item.transcription.text,item.segment.core_start,item.segment.core_end,
+                                      'segment','alignment','acoustic_core','acoustic_core'),item.segment.id))
     n, m = len(lines), len(entries)
     if m < n:
         return None
@@ -190,6 +196,8 @@ def _boundary_split(lines, evidence, config):
                 similarity(i - 1, a, last),
                 tuple(dict.fromkeys(source for _, source in chosen)),
                 text(a, last),
+                first_unit.start_source or "model_timestamp",
+                last_unit.end_source or ("model_timestamp" if last_unit.end is not None else None),
             )
         )
         last = previous
@@ -198,7 +206,7 @@ def _boundary_split(lines, evidence, config):
     joined_similarity = text_similarity(
         "\n".join(lines), "\n".join(item.transcription.text for item in evidence)
     )
-    total += _score(lines, evidence) - 1.55 * joined_similarity
+    total += _score(lines, evidence, config.evidence) - 1.55 * joined_similarity
     return total, spans
 
 
@@ -214,6 +222,7 @@ def align_lines(
     config: LineAlignmentConfig = LineAlignmentConfig(),
 ) -> LineAlignmentResult:
     """保留所有输入行，并在受限范围内匹配多行与多分片。"""
+    transcription = organize_timing(transcription, analysis)
     evidence = _evidence(analysis, transcription)
     rows, columns = len(document.lines), len(evidence)
     dp = [[float("-inf")] * (columns + 1) for _ in range(rows + 1)]
@@ -256,7 +265,7 @@ def align_lines(
                         "\n".join(lines),
                         "\n".join(item.transcription.text for item in group),
                     )
-                    score = _score(lines, group) - (
+                    score = _score(lines, group, config.evidence) - (
                         0.32 if similarity < config.minimum_similarity else 0
                     )
                     split = None
@@ -329,8 +338,9 @@ def align_lines(
         )
         score, split = assignments[index]
         matched_text = " ".join(item.transcription.text for item in group)
+        start_source=end_source=None
         if split is not None:
-            start, end, similarity, source_ids, matched_text = split
+            start, end, similarity, source_ids, matched_text, start_source, end_source = split
             source, issues = "model_units", ()
         elif len(linked_lines) == 1:
             start, end, source, issues = _timing(group)
@@ -338,10 +348,17 @@ def align_lines(
             position = linked_lines.index(index)
             start, end, issues = _interpolated_timing(texts, group, position)
             source = "interpolated"
+        if start_source is None and start is not None:
+            starts=[u for item in group for u in item.transcription.timed_text if u.start==start]
+            start_source=(starts[0].start_source or 'model_timestamp') if starts and source=='model_units' else source
+        if end_source is None and end is not None:
+            ends=[u for item in group for u in item.transcription.timed_text if u.end==end]
+            end_source=(ends[-1].end_source or 'model_timestamp') if ends and source=='model_units' else source
+        issues += tuple(dict.fromkeys(issue for item in group for issue in item.transcription.issues))
         if similarity < config.minimum_similarity:
             issues += ("low_text_match",)
         if any(
-            not quality(item.transcription.text, item.segment).usable for item in group
+            not transcription_quality(item.transcription, item.segment, config.evidence).usable for item in group
         ):
             issues += ("heuristic_quality_risk",)
         output.append(
@@ -355,6 +372,8 @@ def align_lines(
                 source_ids,
                 issues,
                 matched_text,
+                start_source,end_source,
+                tuple(item.transcription.request_window.request_id for item in group if item.transcription.request_window is not None),
             )
         )
-    return LineAlignmentResult(tuple(output), "dp", bool(matches), (), ())
+    return LineAlignmentResult(tuple(output), "dp", False, (), ())

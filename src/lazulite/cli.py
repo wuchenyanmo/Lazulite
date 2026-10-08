@@ -226,7 +226,7 @@ def _run_align(arguments: argparse.Namespace) -> int:
             read_ttml_for_alignment(arguments.lyrics),
             config=PipelineConfig(mode=arguments.mode, language=arguments.language),
         )
-        _write_json(arguments.output, asdict(result.alignment))
+        _write_json(arguments.output, {**asdict(result.alignment), "status":result.alignment.status, "coverage":result.alignment.coverage, "issue_counts":result.alignment.issue_counts})
     finally:
         if separator is not None:
             separator.close()
