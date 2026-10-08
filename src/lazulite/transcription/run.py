@@ -8,7 +8,8 @@ from typing import Literal
 from .evidence import quality, repetition, eligible_for_transcription
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
-from lazulite.models.transcription import TranscriptionResult
+from lazulite.models.transcription import TranscriptionResult, RequestWindow
+from lazulite.cache import cache_key
 
 from .base import Transcriber, TranscriptionInput, TranscriptionRequest
 
@@ -46,51 +47,33 @@ def _context(history, segment, config, explicit):
     return " ".join(parts)[-config.max_prompt_chars :] or None
 
 
-def _split_segment(
-    segment: VocalSegment, maximum_seconds: float
-) -> tuple[VocalSegment, ...]:
-    """将超长窗口显式拆开，同时保留原始声学分片 ID 作为证据关联键。"""
-    if segment.end - segment.start <= maximum_seconds:
-        return (segment,)
-    windows: list[VocalSegment] = []
-    start = segment.start
-    while start < segment.end:
-        end = min(start + maximum_seconds, segment.end)
-        core_start = max(start, min(segment.core_start, end))
-        core_end = min(end, max(segment.core_end, start))
-        # 当核心区间落在其他窗口时，窗口本身仍是有效的位置证据。
-        if core_end <= core_start:
-            core_start, core_end = start, end
-        windows.append(
-            VocalSegment(
-                id=segment.id,
-                section_id=segment.section_id,
-                start=start,
-                end=end,
-                core_start=core_start,
-                core_end=core_end,
-                presence=segment.presence,
-                off_center_risk=segment.off_center_risk,
-            )
-        )
-        start = end
-    return tuple(windows)
-
-
-def build_transcription_inputs(
-    audio: AudioBuffer,
-    segments: Sequence[VocalSegment],
-    *,
-    maximum_seconds: float | None,
-) -> tuple[TranscriptionInput, ...]:
-    """构造并按后端上限拆分输入；不会截断后把残缺窗口当作完整成功。"""
-    expanded: list[TranscriptionInput] = []
+def build_transcription_inputs(audio, segments, *, maximum_seconds):
+    """Every actual request has a distinct identity and optional true core intersection."""
+    expanded=[]
+    if maximum_seconds is not None and maximum_seconds <= 0:
+        raise ValueError('maximum_seconds must be positive')
     for segment in segments:
-        windows = (
-            _split_segment(segment, maximum_seconds) if maximum_seconds else (segment,)
-        )
-        expanded.extend(TranscriptionInput(audio, window) for window in windows)
+        start=segment.start
+        while start < segment.end:
+            end=min(segment.end,start+maximum_seconds) if maximum_seconds else segment.end
+            # Request bounds represent the actual PCM sample slice, not unrounded seconds.
+            start_sample=round(start*audio.sample_rate); end_sample=round(end*audio.sample_rate)
+            a,b=start_sample/audio.sample_rate,end_sample/audio.sample_rate
+            core_start,core_end=max(a,segment.core_start),min(b,segment.core_end)
+            if core_end <= core_start:
+                core_start=core_end=None
+            window=RequestWindow(cache_key({'source':audio.source_id,'parent':segment.id,'samples':[start_sample,end_sample],'rate':audio.sample_rate}),
+                segment.id,a,b,core_start,core_end,len(expanded),segment.section_id,segment.presence,segment.off_center_risk)
+            expanded.append(TranscriptionInput(audio,window))
+            start=end
     return tuple(expanded)
+
+
+def _bind(item, result, request, context=None):
+    if result.source_segment_id != item.segment.id:
+        raise ValueError('backend returned unrelated request evidence')
+    return replace(result,request_window=item.segment,backend_metadata={**result.backend_metadata,
+        'request_context':context,'request_timing':request.include_timing})
 
 
 def transcribe_segments(
@@ -131,43 +114,17 @@ def transcribe_segments(
             result = transcriber.transcribe(
                 (item,), request=replace(effective_request, context=prompt)
             )
-            for segment in result:
-                if segment.source_segment_id != item.segment.id:
-                    raise ValueError("backend returned an unrelated context result")
-                output.append(
-                    replace(
-                        segment,
-                        backend_metadata={
-                            **segment.backend_metadata,
-                            "request_context": prompt,
-                            "request_timing": effective_request.include_timing,
-                            "request_window": [item.segment.start, item.segment.end],
-                        },
-                    )
-                )
-                if quality(segment.text, item.segment).risk < 0.42:
-                    history.append(repetition(segment.text)[1])
+            if len(result)!=1:
+                raise ValueError('backend must return one result per request window')
+            segment=_bind(item,result[0],effective_request,prompt)
+            output.append(segment)
+            if quality(segment.text,item.segment).risk < .42:
+                history.append(repetition(segment.text)[1])
     else:
         output = transcriber.transcribe(
             inputs, request=replace(effective_request, context=None)
         )
-    valid_ids = {segment.id for segment in segments}
-    unknown_ids = {segment.source_segment_id for segment in output} - valid_ids
-    if unknown_ids:
-        raise ValueError(f"后端返回了未知 source_segment_id: {sorted(unknown_ids)!r}")
-    output = tuple(
-        replace(
-            item,
-            backend_metadata={
-                **item.backend_metadata,
-                "request_timing": effective_request.include_timing,
-                "request_windows": [
-                    [value.segment.start, value.segment.end]
-                    for value in inputs
-                    if value.segment.id == item.source_segment_id
-                ],
-            },
-        )
-        for item in output
-    )
-    return TranscriptionResult(backend=transcriber.info, segments=output)
+        if len(output)!=len(inputs):
+            raise ValueError('backend must return one ordered result per request window')
+        output=tuple(_bind(item,result,effective_request) for item,result in zip(inputs,output))
+    return TranscriptionResult(backend=transcriber.info,segments=tuple(output))

@@ -25,6 +25,8 @@ from lazulite.models.lyrics import LyricDocument
 from lazulite.models.transcription import (
     BackendInfo,
     TimedText,
+    RequestWindow,
+    ProbabilitySummary,
     TranscriptionResult,
     TranscriptionSegment,
 )
@@ -32,7 +34,7 @@ from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
 from lazulite.transcription.evidence import eligible_for_transcription
 
-_CACHE_ALGORITHM_REVISION = "pipeline-result-v3-prepared"
+_CACHE_ALGORITHM_REVISION = "pipeline-result-v4-request-evidence"
 
 
 class Separator(Protocol):
@@ -154,9 +156,12 @@ class AlignmentPipeline:
                             confidence=item["confidence"],
                             confidence_kind=item["confidence_kind"],
                             timed_text=tuple(
-                                TimedText(**unit) for unit in item["timed_text"]
+                                TimedText(**{**unit, "generation_steps":tuple(unit["generation_steps"]), "probability":ProbabilitySummary(**unit["probability"]) if unit["probability"] is not None else None}) for unit in item["timed_text"]
                             ),
                             backend_metadata=item["backend_metadata"],
+                            request_window=RequestWindow(**item["request_window"]) if item["request_window"] is not None else None,
+                            probability=ProbabilitySummary(**item["probability"]) if item["probability"] is not None else None,
+                            issues=tuple(item["issues"]),
                         )
                         for item in transcription_value["segments"]
                     ),

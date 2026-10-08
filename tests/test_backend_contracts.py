@@ -120,3 +120,16 @@ def test_qwen_automatic_language_header_is_not_counted_as_lyric_tokens() -> None
     assert language == "Japanese"
     assert text == "歌"
     assert steps == [2]
+
+
+def test_actual_windows_keep_parent_and_padding_only_core_empty():
+    import numpy as np
+    from lazulite.models.audio import AudioBuffer,VocalSegment
+    from lazulite.transcription.run import build_transcription_inputs
+    audio=AudioBuffer(np.zeros((1,640000),np.float32),16000,'a')
+    inputs=build_transcription_inputs(audio,(VocalSegment('parent',None,0,40,32,38,None,None),),maximum_seconds=30)
+    assert [i.segment.id for i in inputs]==['parent','parent']
+    assert len({i.segment.request_id for i in inputs})==2
+    assert inputs[0].segment.core_start is None and inputs[0].segment.core_end is None
+    assert (inputs[1].segment.start,inputs[1].segment.end)==(30,40)
+    assert (inputs[1].segment.core_start,inputs[1].segment.core_end)==(32,38)

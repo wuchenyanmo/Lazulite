@@ -27,6 +27,7 @@ def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = Fals
     if forced:
         return
     parser.add_argument("--device", default="cuda", help="Whisper 使用的 Torch 设备")
+    parser.add_argument("--max-new-tokens", type=int, default=128, help="Whisper 生成上限")
     parser.add_argument("--top-k", type=int, default=5, help="每个生成 token 保留的候选数")
     parser.add_argument("--full-distributions", type=Path, help="按分片导出完整 logprob NPZ 的目录")
 
@@ -108,6 +109,7 @@ def _build_transcriber(arguments: argparse.Namespace):
             revision=arguments.revision,
             device=arguments.device,
             top_k=arguments.top_k,
+            max_new_tokens=arguments.max_new_tokens,
             distribution_output_dir=distributions,
         ))
     return QwenBackend(QwenConfig(

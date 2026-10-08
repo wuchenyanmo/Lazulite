@@ -9,7 +9,7 @@ from typing import Sequence
 
 import numpy as np
 
-from lazulite.models.transcription import BackendInfo, TimedText, TranscriptionSegment
+from lazulite.models.transcription import BackendInfo, TimedText, TranscriptionSegment, ProbabilitySummary
 from lazulite.transcription.base import TranscriberCapabilities, TranscriptionInput, TranscriptionRequest
 from lazulite.transcription.token_scores import export_full_logprobs, extract_token_scores
 
@@ -25,6 +25,10 @@ class WhisperConfig:
     max_new_tokens: int = 128
     top_k: int = 5
     distribution_output_dir: Path | None = None
+
+    def __post_init__(self):
+        if self.max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be positive")
 
 
 def _byte_decoder() -> dict[str, int]:
@@ -75,11 +79,9 @@ class WhisperBackend:
         return item.audio.samples[:, start:end].mean(axis=0, dtype=np.float32)
 
     def _timed_text(self, ids: list[int], prefix: int, timestamps, item: TranscriptionInput) -> tuple[TimedText, ...]:
-        if timestamps is None:
-            return ()
-        values = timestamps[0].detach().float().cpu().tolist()
+        values = timestamps[0].detach().float().cpu().tolist() if timestamps is not None else []
         special = set(self._processor.tokenizer.all_special_ids)
-        pending = bytearray(); group_start: int | None = None; groups: list[tuple[str, int]] = []
+        pending = bytearray(); group_start: int | None = None; groups: list[tuple[str, int, int]] = []
         for step, token_id in enumerate(ids):
             if token_id in special:
                 continue
@@ -93,10 +95,10 @@ class WhisperBackend:
                 continue
             if text:
                 # 一个 Unicode 字符可能跨多个 BPE token；开始边界必须取首 token。
-                groups.append((text, group_start))
+                groups.append((text, group_start, step + 1))
                 pending.clear(); group_start = None
         result: list[TimedText] = []
-        for index, (text, first_step) in enumerate(groups):
+        for index, (text, first_step, last_step) in enumerate(groups):
             sequence_index = prefix + first_step
             start = values[sequence_index] if sequence_index < len(values) else None
             next_step = groups[index + 1][1] if index + 1 < len(groups) else None
@@ -107,7 +109,7 @@ class WhisperBackend:
                 end += item.segment.start
             if start is not None and end is not None and end <= start:
                 end = None
-            result.append(TimedText(text, start, end, "subword", "model"))
+            result.append(TimedText(text, start, end, "subword", "model", "model_timestamp" if start is not None else None, "successor_start" if end is not None else None, tuple(range(first_step,last_step))))
         return tuple(result)
 
     def _one(self, item: TranscriptionInput, request: TranscriptionRequest) -> TranscriptionSegment:
@@ -134,8 +136,26 @@ class WhisperBackend:
             target = self._config.distribution_output_dir / f"{item.segment.id}-{self._export_index}.npz"; self._export_index += 1
             metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id, tokenizer_revision=self.info.revision))
         timestamps = output.get("token_timestamps")
+        eos = getattr(self._processor.tokenizer, 'eos_token_id', None)
+        stop = 'eos' if eos is not None and eos in ids else 'max_new_tokens' if len(ids)>=self._config.max_new_tokens else 'unknown'
+        raw_times = timestamps[0].detach().float().cpu().tolist() if timestamps is not None else None
+        metadata.update({'sequence_ids':sequence,'prefix_ids':sequence[:prefix],
+                         'raw_token_timestamps':raw_times,'stop_reason':stop,
+                         'generation_parameters':{'max_new_tokens':self._config.max_new_tokens,'do_sample':False,
+                             'condition_on_prev_tokens':False,'task':'transcribe','language':request.language,
+                             'return_token_timestamps':request.include_timing},
+                         'eos_timestamp_copied': bool(raw_times is not None and eos is not None and eos in ids
+                             and prefix+ids.index(eos)<len(raw_times) and prefix+ids.index(eos)>0
+                             and raw_times[prefix+ids.index(eos)]==raw_times[prefix+ids.index(eos)-1])})
+        probabilities={x.generation_step:float(np.exp(x.logprob)) for x in scores.scores}
+        def summarize(steps):
+            values=[probabilities[i] for i in steps if i in probabilities]
+            return ProbabilitySummary(float(np.mean(values)),min(values),sum(v<.2 for v in values)/len(values),len(values)) if values else None
+        from dataclasses import replace
+        units=tuple(replace(u,probability=summarize(u.generation_steps)) for u in self._timed_text(ids,prefix,timestamps,item))
+        metadata['unicode_groups']=[{'text':u.text,'generation_steps':list(u.generation_steps)} for u in units]
         text = self._processor.batch_decode([ids], skip_special_tokens=True)[0]
-        return TranscriptionSegment(item.segment.id, text, request.language, None, None, scores.confidence, "generation_token_geometric_mean" if scores.confidence is not None else None, self._timed_text(ids, prefix, timestamps, item), metadata)
+        return TranscriptionSegment(item.segment.id, text, request.language, None, None, scores.confidence, "generation_token_geometric_mean" if scores.confidence is not None else None, units, metadata, probability=summarize(lexical_steps), issues=("generation_truncated",) if stop=="max_new_tokens" else ())
 
     def transcribe(self, inputs: Sequence[TranscriptionInput], *, request: TranscriptionRequest) -> tuple[TranscriptionSegment, ...]:
         return tuple(self._one(item, request) for item in inputs)

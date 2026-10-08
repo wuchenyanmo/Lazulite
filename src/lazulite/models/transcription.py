@@ -37,12 +37,56 @@ class TimedText:
     end: float | None
     granularity: TimedTextGranularity
     source: TimedTextSource
+    start_source: str | None = None
+    end_source: str | None = None
+    generation_steps: tuple[int, ...] = ()
+    probability: ProbabilitySummary | None = None
 
     def __post_init__(self) -> None:
         _validate_time(self.start, "TimedText.start")
         _validate_time(self.end, "TimedText.end")
         if self.start is not None and self.end is not None and self.start > self.end:
             raise ValueError("TimedText 的开始时间不能晚于结束时间")
+
+
+@dataclass(frozen=True, slots=True)
+class RequestWindow:
+    request_id: str
+    source_segment_id: str
+    start: float
+    end: float
+    core_start: float | None
+    core_end: float | None
+    sequence: int = 0
+    section_id: str | None = None
+    presence: float | None = None
+    off_center_risk: float | None = None
+
+    @property
+    def id(self):
+        return self.source_segment_id
+
+    def __post_init__(self):
+        if not self.request_id or not self.source_segment_id or not 0 <= self.start < self.end or not isfinite(self.end):
+            raise ValueError('invalid transcription window')
+        if (self.core_start is None) != (self.core_end is None):
+            raise ValueError('core intersection must have both endpoints or neither')
+        if self.core_start is not None and not self.start <= self.core_start < self.core_end <= self.end:
+            raise ValueError('core outside request window')
+
+
+@dataclass(frozen=True, slots=True)
+class ProbabilitySummary:
+    mean: float
+    minimum: float
+    low_fraction: float
+    count: int
+    threshold: float = .2
+    definition: str = 'lexical_generation_probabilities-v1'
+
+    def __post_init__(self):
+        if self.count < 1 or not all(isfinite(x) and 0 <= x <= 1 for x in (self.mean,self.minimum,self.low_fraction,self.threshold)):
+            raise ValueError('invalid probability summary')
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +100,9 @@ class TranscriptionSegment:
     confidence_kind: str | None
     timed_text: tuple[TimedText, ...]
     backend_metadata: dict[str, object]
+    request_window: RequestWindow | None = None
+    probability: ProbabilitySummary | None = None
+    issues: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_segment_id:

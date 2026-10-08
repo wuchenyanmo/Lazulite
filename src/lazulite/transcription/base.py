@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol, Sequence
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
-from lazulite.models.transcription import BackendInfo, TranscriptionSegment
+from lazulite.models.transcription import BackendInfo, TranscriptionSegment, RequestWindow
 
 TimestampGranularity = Literal["none", "segment", "subword", "word", "character"]
 
@@ -32,7 +32,7 @@ class TranscriberCapabilities:
 @dataclass(frozen=True, slots=True)
 class TranscriptionInput:
     audio: AudioBuffer
-    segment: VocalSegment
+    segment: VocalSegment | RequestWindow
 
     def __post_init__(self) -> None:
         if self.segment.end > self.audio.duration:
