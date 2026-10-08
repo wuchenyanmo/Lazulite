@@ -252,3 +252,10 @@ def test_ttml_time_units_and_reject_relative_containers(tmp_path):
         with pytest.raises(TtmlFormatError):_parse_time(value,field='test')
     p=tmp_path/'relative.ttml';p.write_text('<tt><body begin="2s"><p>歌</p></body></tt>')
     with pytest.raises(TtmlFormatError):read_ttml_for_alignment(p)
+
+
+def test_ttml_does_not_project_metadata_or_foreign_paragraphs(tmp_path):
+    p=tmp_path/'namespaces.ttml'
+    p.write_text('<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ext="urn:extension"><head><metadata><p>metadata</p></metadata></head><body><p key="good">あ<ext:span>annotation</ext:span>い</p><ext:p>foreign</ext:p><ext:wrapper><p>nested foreign</p></ext:wrapper></body></tt>')
+    result=read_ttml_for_alignment(p)
+    assert len(result.lines)==1 and result.lines[0].text=='あい'

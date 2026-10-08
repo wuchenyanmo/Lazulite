@@ -45,7 +45,9 @@ class DemucsSeparator:
         except ImportError as error:
             raise RuntimeError("人声分离需要安装 lazulite[vocal]") from error
         self._torch = torch; self._apply_model = apply_model
-        self._model = get_model(self._config.model_name).to(self._config.device).eval()
+        # Weight construction must not consume the caller's CPU RNG stream.
+        with torch.random.fork_rng(devices=[]):
+            self._model = get_model(self._config.model_name).to(self._config.device).eval()
         return self._model
 
     @property

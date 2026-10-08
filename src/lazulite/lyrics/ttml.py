@@ -16,6 +16,9 @@ class TtmlFormatError(ValueError):
 
 def _local_name(name):return name.rsplit('}',1)[-1]
 
+def _standard(element):
+    return not element.tag.startswith('{') or element.tag.split('}',1)[0]=='{http://www.w3.org/ns/ttml'
+
 def _attribute(element,name):
     return next((v for k,v in element.attrib.items() if _local_name(k)==name),None)
 
@@ -48,7 +51,7 @@ def _ruby(element):
 
 
 def _visible(element):
-    if _excluded(element) or _ruby(element) in {'text','textContainer','delimiter'}:return ''
+    if not _standard(element) or _excluded(element) or _ruby(element) in {'text','textContainer','delimiter'}:return ''
     return (element.text or '')+''.join(_visible(c)+(c.tail or '') for c in element)
 
 
@@ -79,7 +82,9 @@ def _project_paragraph(element,line_id):
         for name in ('begin','end','dur'):
             value=_attribute(node,name)
             if value is not None:_parse_time(value,field=name)
-        if _excluded(node) or _ruby(node) in {'text','textContainer','delimiter'}:return
+        if not _standard(node) or _excluded(node) or _ruby(node) in {'text','textContainer','delimiter'}:return
+        if _local_name(node.tag)=='br':
+            append('\n');return
         if _ruby(node)=='container':
             bases=[c for c in node.iter() if c is not node and (_ruby(c)=='base' or _local_name(c.tag)=='rb')]
             readings=[c for c in node.iter() if c is not node and (_ruby(c)=='text' or _local_name(c.tag)=='rt')]
@@ -87,11 +92,17 @@ def _project_paragraph(element,line_id):
                 base=_visible(bases[0]);reading=''.join(readings[0].itertext())
                 # Ruby reading is explicitly associated; Latin cannot masquerade as kana.
                 language='ja' if is_kana_text(reading) else 'latin' if re.fullmatch(r"[A-Za-z' ]+",reading) else 'unknown'
-                append(node.text or '')
-                for child in node:
-                    if child is bases[0]:append(base,reading if language!='unknown' else '', 'imported_ruby',language)
-                    elif child is not readings[0]:append(_visible(child))
-                    append(child.tail or '')
+                def ruby_parts(part):
+                    if part is bases[0]:
+                        append(base,reading if language!='unknown' else '', 'imported_ruby',language)
+                        return
+                    if part is readings[0] or _ruby(part) in {'text','textContainer','delimiter'}:
+                        return
+                    append(part.text or '')
+                    for child in part:
+                        ruby_parts(child)
+                        append(child.tail or '')
+                ruby_parts(node)
             else:
                 append(_visible(node),'','ambiguous_ruby','unknown')
             return
@@ -111,10 +122,11 @@ def _read(path):
     try:
         data=Path(path).read_bytes();root=ET.fromstring(data)
     except (OSError,ET.ParseError) as error:raise TtmlFormatError(f'无法读取 TTML：{path}') from error
+    if not _standard(root) or _local_name(root.tag)!='tt':raise TtmlFormatError('不支持的 TTML 根元素')
     snapshot=hashlib.sha256(data).hexdigest()[:16]
     rows=[];ids=set()
     def visit(node):
-        if _excluded(node):return
+        if not _standard(node) or _excluded(node):return
         tag=_local_name(node.tag)
         for name in ('begin','end','dur'):
             value=_attribute(node,name)
@@ -130,7 +142,8 @@ def _read(path):
             row=_project_paragraph(node,line_id)
             if row.text.strip():rows.append(row)
         else:
-            for child in node:visit(child)
+            for child in node:
+                if _local_name(child.tag) in {'body','div','p'}:visit(child)
     visit(root)
     if not rows:raise TtmlFormatError('TTML 中没有可对齐的正文行')
     return rows,_attribute(root,'lang')

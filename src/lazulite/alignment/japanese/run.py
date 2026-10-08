@@ -121,7 +121,7 @@ def _result(request,units,execution,calibration,issues=()):
         ends=[u.proposed_timing.end.time for u in group if u.proposed_timing.end is not None]
         lines.append({'line_id':line.line_id,'start':min(starts) if starts else None,'end':max(ends) if ends else None,
                       'first_unit_complete': bool(group) and complete(group[0].proposed_timing)})
-    status='complete' if full==len(units) and units else 'partial' if full or single else 'unresolved'
+    status='complete' if full==len(units) and units and not any(i.code=='partial_targets' for i in issues) else 'partial' if full or single else 'unresolved'
     return JapaneseAlignmentResult(units,status,tuple(lines),{'total':len(units),'raw_complete':raw,'proposed_complete':full,
         'single_endpoint':single,'unresolved':len(units)-full-single,'derived':derived,
         'profile_derived':sum(any(e is not None and e.source=='profile_hold' for e in (u.raw_timing.start,u.raw_timing.end)) for u in units),

@@ -131,3 +131,34 @@ def test_completion_interpolates_only_same_piece_and_keeps_raw_cross_gap():
     us=(unit(0,8,8.2),cross,unit(2,9,10))
     out=complete_units(req,us,concat,10)
     assert out[1].proposed_timing.start.time==8.2 and out[1].raw_timing==cross.raw_timing
+
+
+def test_reading_change_reuses_acoustics_and_core_change_invalidates(tmp_path):
+    from lazulite.cache import FileCache
+    audio=AudioBuffer(np.zeros((1,32000),np.float32),16000,'a')
+    seg=VocalSegment('s',None,0,2,0,2,None,None)
+    prepared=prepare_existing_vocals(audio,original_id='a',original_duration=2,
+        analysis=VocalAnalysis('a',(seg,),(),True,2),analysis_identity={'reference':'none'})
+    req=JapaneseAlignmentRequest((JapaneseLine('l','あ',(JapaneseUnit('u',(0,1),'あ','ja','user'),)),))
+    class Backend:
+        cache_identity={'fixture':'trusted-content-1'}
+        calls=0
+        def emissions(self,audio,**kw):
+            self.calls+=1
+            return np.zeros(((audio.samples.shape[1]-400)//320+1,32),np.float32)
+    b=Backend();cache=FileCache(tmp_path)
+    first=align_japanese(prepared,req,backend=b,cache=cache)
+    second=align_japanese(prepared,replace(req,lines=(replace(req.lines[0],units=(replace(req.lines[0].units[0],reading='い'),)),)),backend=b,cache=cache)
+    assert b.calls==1 and first.execution['acoustic_id']==second.execution['acoustic_id']
+    manual=replace(prepared,segments=(replace(seg,core_start=1),),segment_source='manual')
+    third=align_japanese(manual,req,backend=b,cache=cache)
+    assert b.calls==2 and third.execution['acoustic_id']!=first.execution['acoustic_id']
+
+
+def test_interpolation_does_not_hide_unresolved_reading_status():
+    from lazulite.alignment.japanese.run import _result
+    from lazulite.models.japanese import JapaneseUnitResult,JapaneseIssue,Timing,Endpoint
+    request=JapaneseAlignmentRequest((JapaneseLine('l','漢',(JapaneseUnit('u',(0,1),'','ja','unknown'),)),))
+    unit=JapaneseUnitResult('u','l','','',Timing(),Timing(Endpoint(1,'interpolated'),Endpoint(2,'interpolated')))
+    result=_result(request,(unit,),{}, {},(JapaneseIssue('request','partial_targets'),))
+    assert result.status=='partial' and result.coverage['proposed_complete']==1 and result.coverage['raw_complete']==0
