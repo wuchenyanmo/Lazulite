@@ -88,14 +88,15 @@ class NextFireBackend:
         if self._model is None:
             import torch
             self._torch = torch
-            from lazulite._runtime import preserve_loading_random_state
-            with preserve_loading_random_state(torch):
+            from lazulite._runtime import preserve_random_state
+            with preserve_random_state(torch):
                 from transformers import Wav2Vec2ForCTC
                 self._model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path, local_files_only=True,
                                                            dtype=torch.float32).to(self.config.device).eval()
         def forward(y):
             t = self._torch
-            with t.inference_mode():
+            from lazulite._runtime import preserve_random_state
+            with preserve_random_state(t), t.inference_mode():
                 return self._model(t.from_numpy(y).unsqueeze(0).to(self.config.device)).logits[0].log_softmax(-1).cpu().numpy()
         return chunked_forward(audio.samples[0],forward,cancel=cancel,event_sink=event_sink)
 

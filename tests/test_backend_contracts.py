@@ -138,7 +138,7 @@ def test_actual_windows_keep_parent_and_padding_only_core_empty():
 def test_model_loading_restores_python_rng_even_on_failure():
     import random
     from contextlib import contextmanager
-    from lazulite._runtime import preserve_loading_random_state
+    from lazulite._runtime import preserve_random_state
     calls=[]
     class Torch:
         class random:
@@ -150,7 +150,7 @@ def test_model_loading_restores_python_rng_even_on_failure():
                 finally:calls.append(('exit',devices))
     state=random.getstate()
     with pytest.raises(RuntimeError):
-        with preserve_loading_random_state(Torch):
+        with preserve_random_state(Torch):
             random.random()
             raise RuntimeError('load failed')
     assert random.getstate()==state and calls==[('enter',[]),('exit',[])]

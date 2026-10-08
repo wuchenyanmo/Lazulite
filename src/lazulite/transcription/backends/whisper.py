@@ -57,8 +57,8 @@ class WhisperBackend:
         self._torch = torch
         self._config = config
         dtype = getattr(torch, config.precision)
-        from lazulite._runtime import preserve_loading_random_state
-        with preserve_loading_random_state(torch):
+        from lazulite._runtime import preserve_random_state
+        with preserve_random_state(torch):
             from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
             self._model = AutoModelForSpeechSeq2Seq.from_pretrained(str(config.model_path), dtype=dtype, attn_implementation=config.attention_implementation).to(config.device).eval()
             self._processor = AutoProcessor.from_pretrained(str(config.model_path))
@@ -136,7 +136,8 @@ class WhisperBackend:
         prompt_kwargs = {}
         if request.context:
             prompt_kwargs["prompt_ids"] = self._processor.get_prompt_ids(request.context, return_tensors="pt").to(self._config.device)
-        with self._torch.inference_mode():
+        from lazulite._runtime import preserve_random_state
+        with preserve_random_state(self._torch), self._torch.inference_mode():
             output = self._model.generate(**inputs, **prompt_kwargs, language=request.language, task="transcribe", max_new_tokens=self._config.max_new_tokens, do_sample=False, return_token_timestamps=request.include_timing, return_dict_in_generate=True, output_scores=True, condition_on_prev_tokens=False)
         generation_scores = output["scores"]
         if not generation_scores:

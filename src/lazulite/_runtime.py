@@ -4,8 +4,8 @@ import random
 
 
 @contextmanager
-def preserve_loading_random_state(torch):
-    """CPU model construction must not consume the caller's random streams.
+def preserve_random_state(torch):
+    """Model construction and eval-time layer-drop draws must not consume caller RNG.
 
     These loaders construct on CPU and move fixed weights to the requested device;
     they never initialize random parameters directly on CUDA.
