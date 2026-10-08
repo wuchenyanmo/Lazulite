@@ -141,7 +141,7 @@ def test_actual_asr_input_is_main_vocal(monkeypatch):
     ).astype(np.float32)
     audio = AudioBuffer(wave, 16000, "stereo")
     monkeypatch.setattr(
-        pipeline,
+        __import__("lazulite.audio.preparation", fromlist=["analyze_vocals"]),
         "analyze_vocals",
         lambda *a, **k: VocalAnalysis("stereo", (segment(0, end=8),), (), True, 8),
     )
@@ -236,7 +236,7 @@ def test_auto_fallback_only_requests_missing_stateless_windows(monkeypatch):
 
     segments = tuple(segment(i, i * 2, i * 2 + 2) for i in range(5))
     monkeypatch.setattr(
-        pipeline,
+        __import__("lazulite.audio.preparation", fromlist=["analyze_vocals"]),
         "analyze_vocals",
         lambda *a, **k: VocalAnalysis("a", segments, (), True, 10),
     )

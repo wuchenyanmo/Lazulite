@@ -37,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    prepare = commands.add_parser("prepare-vocals", help="从原曲分离，或显式导入完整人声")
+    prepare.add_argument("audio", type=Path, nargs="?", help="原曲音频（与 --vocals 互斥）")
+    prepare.add_argument("--vocals", type=Path, help="已有完整人声文件")
+    prepare.add_argument("--original-id", help="导入人声对应的原曲内容身份")
+    prepare.add_argument("--original-duration", type=float, help="导入人声对应的原曲秒数")
+    prepare.add_argument("--separator-model", default="htdemucs")
+    prepare.add_argument("--separator-device", default="cuda")
+    prepare.add_argument("--separator-revision")
+    prepare.add_argument("--output-dir", type=Path, required=True)
+
     lyrics = commands.add_parser("lyrics", help="从在线来源搜索歌词候选")
     lyric_commands = lyrics.add_subparsers(dest="lyrics_command", required=True)
     search = lyric_commands.add_parser("search", help="读取音频元数据并搜索歌词")
@@ -96,6 +106,30 @@ def _build_transcriber(arguments: argparse.Namespace):
         top_k=arguments.top_k,
         distribution_output_dir=distributions,
     ))
+
+
+def _run_prepare(arguments: argparse.Namespace) -> int:
+    from .audio.io import decode_audio
+    from .audio.preparation import prepare_vocals, prepare_existing_vocals, write_prepared
+    if (arguments.audio is None) == (arguments.vocals is None):
+        raise ValueError("必须且只能提供原曲 audio 或 --vocals 完整人声")
+    if arguments.vocals is not None:
+        if arguments.original_id is None or arguments.original_duration is None:
+            raise ValueError("导入人声必须提供 --original-id 和 --original-duration")
+        prepared = prepare_existing_vocals(decode_audio(arguments.vocals, sample_rate=44100, channels=2),
+            original_id=arguments.original_id, original_duration=arguments.original_duration)
+    else:
+        if arguments.original_id is not None or arguments.original_duration is not None:
+            raise ValueError("原曲自动准备不接受人声导入身份参数")
+        from .audio.separation import DemucsConfig, DemucsSeparator
+        separator = DemucsSeparator(DemucsConfig(arguments.separator_model, arguments.separator_device,
+                                                  arguments.separator_revision))
+        try:
+            prepared = prepare_vocals(decode_audio(arguments.audio, sample_rate=44100, channels=2), separator=separator)
+        finally:
+            separator.close()
+    write_prepared(prepared, arguments.output_dir)
+    return 0
 
 
 def _run_lyrics_search(arguments: argparse.Namespace) -> int:
@@ -181,6 +215,7 @@ def _run_forced_alignment(arguments: argparse.Namespace) -> int:
 
 
 _HANDLERS: dict[tuple[str, str | None], Callable[[argparse.Namespace], int]] = {
+    ("prepare-vocals", None): _run_prepare,
     ("lyrics", "search"): _run_lyrics_search,
     ("transcribe", None): _run_transcribe,
     ("align", None): _run_align,

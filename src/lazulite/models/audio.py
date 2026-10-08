@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
+import hashlib
+import json
 
 import numpy as np
 from numpy.typing import NDArray
@@ -101,3 +103,45 @@ class VocalAnalysis:
         ids = [segment.id for segment in self.segments]
         if len(ids) != len(set(ids)):
             raise ValueError("声学分片 id 必须唯一")
+
+
+def pcm_identity(audio: AudioBuffer) -> str:
+    """Content identity includes layout/rate; never trusts a source path or label."""
+    digest = hashlib.sha256(json.dumps([audio.sample_rate, list(audio.samples.shape)]).encode())
+    digest.update(np.ascontiguousarray(audio.samples, dtype="<f4").tobytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedVocals:
+    original_id: str
+    original_duration: float
+    vocals: AudioBuffer
+    pcm_id: str
+    analysis: VocalAnalysis
+    segments: tuple[VocalSegment, ...]
+    segment_source: str = "automatic"
+    origin: float = 0.0
+    separation: dict[str, object] = field(default_factory=dict)
+    analysis_identity: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.original_id or not isfinite(self.original_duration) or self.original_duration < 0:
+            raise ValueError("invalid original identity/duration")
+        if self.origin != 0:
+            raise ValueError("only declared original-axis origin 0 is supported")
+        if self.segment_source not in {"automatic", "manual"}:
+            raise ValueError("invalid segment source")
+        if not np.isfinite(self.vocals.samples).all() or pcm_identity(self.vocals) != self.pcm_id:
+            raise ValueError("invalid PCM content identity")
+        if abs(self.vocals.duration - self.original_duration) > 1 / self.vocals.sample_rate:
+            raise ValueError("stem must cover the complete original duration")
+        if self.analysis.source_id != self.vocals.source_id:
+            raise ValueError("analysis and vocals have different source identities")
+        if self.segment_source == "automatic" and self.segments != self.analysis.segments:
+            raise ValueError("automatic selection must preserve analysis segments")
+        for segments in (self.analysis.segments, self.segments):
+            if len({s.id for s in segments}) != len(segments):
+                raise ValueError("duplicate segment ID")
+            if any(s.start < 0 or s.end > self.vocals.duration for s in segments):
+                raise ValueError("segment outside complete stem")

@@ -10,8 +10,9 @@ import warnings
 from lazulite import __version__
 from lazulite.alignment.line import LineAlignmentConfig, align_lines
 from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
-from lazulite.audio.activity import VocalConfig, analyze_vocals, main_vocal_audio
+from lazulite.audio.activity import VocalConfig, main_vocal_audio
 from lazulite.audio.io import resample_audio
+from lazulite.audio.preparation import prepare_vocals, prepare_existing_vocals
 from lazulite.cache import FileCache, cache_key
 from lazulite.events import EventSink, ProgressEvent
 from lazulite.models.alignment import (
@@ -19,7 +20,7 @@ from lazulite.models.alignment import (
     AlignmentAnchor,
     LineAlignmentResult,
 )
-from lazulite.models.audio import AudioBuffer, VocalAnalysis, VocalSegment
+from lazulite.models.audio import AudioBuffer, PreparedVocals, VocalAnalysis, VocalSegment, pcm_identity
 from lazulite.models.lyrics import LyricDocument
 from lazulite.models.transcription import (
     BackendInfo,
@@ -31,7 +32,7 @@ from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
 from lazulite.transcription.evidence import eligible_for_transcription
 
-_CACHE_ALGORITHM_REVISION = "pipeline-result-v2-preserved-algorithms"
+_CACHE_ALGORITHM_REVISION = "pipeline-result-v3-prepared"
 
 
 class Separator(Protocol):
@@ -106,6 +107,7 @@ class AlignmentPipeline:
                 "lazulite_version": __version__,
                 "audio": {
                     "source_id": audio.source_id,
+                    "pcm_id": pcm_identity(audio),
                     "sample_rate": audio.sample_rate,
                     "shape": list(audio.samples.shape),
                 },
@@ -212,12 +214,34 @@ class AlignmentPipeline:
         *,
         config: PipelineConfig = PipelineConfig(),
     ) -> PipelineResult:
+        prepared = (
+            prepare_vocals(audio, separator=self._separator, config=config.vocal)
+            if self._separator is not None else
+            prepare_existing_vocals(audio, original_id=audio.source_id,
+                                    original_duration=audio.duration, config=config.vocal)
+        )
+        return self.run_prepared(prepared, document, config=config)
+
+    def run_prepared(
+        self, prepared: PreparedVocals, document: LyricDocument, *,
+        config: PipelineConfig = PipelineConfig(),
+    ) -> PipelineResult:
+        prepared.__post_init__()
+        audio = vocals = prepared.vocals
+        analysis = replace(prepared.analysis, segments=prepared.segments)
         has_complete_source_times = bool(document.lines) and all(
             line.source_start is not None for line in document.lines
         )
         if config.mode == "offset" and not has_complete_source_times:
             raise ValueError("offset 模式要求所有歌词行具有 source_start")
         key = self._cache_key(audio, document, config)
+        if key is not None:
+            key = cache_key({"pipeline": key, "pcm": prepared.pcm_id,
+                             "analysis": asdict(prepared.analysis),
+                             "selection": [asdict(s) for s in prepared.segments],
+                             "source": prepared.segment_source,
+                             "preparation": prepared.analysis_identity,
+                             "separation": prepared.separation})
         if key is not None and self._cache is not None:
             cached = self._deserialize(self._cache.get_json(key) or {})
             if cached is not None and (
@@ -233,18 +257,13 @@ class AlignmentPipeline:
                 "sample_rate": audio.sample_rate,
                 "channels": audio.samples.shape[0],
             },
-            "vocal_reference": "original_mix_mono_peak"
-            if self._separator
-            else "full_scale",
+            "vocal_reference": prepared.analysis_identity.get("reference"),
+            "prepared_pcm": prepared.pcm_id,
             "asr_input": "mid_minus_absolute_side",
             "resampling": "ffmpeg-swr:filter_size=32:phase_shift=10:cutoff=0.97:zero_pad=64-output-samples:length=ceil",
             "requests": [],
         }
         self._emit("analysis", "started")
-        vocals = self._separator.separate(audio) if self._separator else audio
-        analysis = analyze_vocals(
-            vocals, config=config.vocal, reference=audio if self._separator else None
-        )
         if not analysis.is_vocal or not analysis.segments:
             # 无人声只是缺少自动化证据，不能丢失调用方传入的歌词行。
             unresolved = LineAlignmentResult(

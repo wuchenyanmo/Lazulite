@@ -17,8 +17,12 @@ class DemucsConfig:
     model_revision: str | None = None
     split: bool = True
     overlap: float = 0.25
+    shifts: int = 1
+    seed: int = 0
 
     def __post_init__(self) -> None:
+        if self.shifts < 0:
+            raise ValueError("Demucs shifts must be nonnegative")
         if not 0 <= self.overlap < 1:
             raise ValueError("Demucs overlap 必须在 [0, 1) 内")
 
@@ -63,7 +67,17 @@ class DemucsSeparator:
     def separate(self, audio: AudioBuffer) -> AudioBuffer:
         prepared = resample_audio(audio, sample_rate=44_100, channels=2)
         model = self._load(); waveform = self._torch.from_numpy(prepared.samples).unsqueeze(0).to(self._config.device)
-        with self._torch.inference_mode(): sources = self._apply_model(model, waveform, device=self._config.device, progress=False, split=self._config.split, overlap=self._config.overlap)
+        # Demucs draws shifts from Python random. Restore caller state even on failure.
+        import random
+        state = random.getstate()
+        try:
+            random.seed(self._config.seed)
+            with self._torch.inference_mode():
+                sources = self._apply_model(model, waveform, device=self._config.device, progress=False,
+                                            split=self._config.split, overlap=self._config.overlap,
+                                            shifts=self._config.shifts)
+        finally:
+            random.setstate(state)
         vocals = sources[0, model.sources.index("vocals")].detach().float().cpu().numpy()
         return AudioBuffer(vocals, 44_100, audio.source_id)
 

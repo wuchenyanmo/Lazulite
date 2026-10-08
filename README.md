@@ -69,3 +69,20 @@ python -m build
 ```
 
 整曲评估方法和结果见 [基准记录](docs/benchmark.md)，接口约定与模型实测入口见 [重构说明](docs/refactoring.md)。
+
+### 共享人声准备
+
+`audio.preparation.prepare_vocals(original, separator=...)` 从原曲分离并分析。
+`prepare_existing_vocals(stem, original_id=..., original_duration=...)` 显式分析完整人声；
+传入已有 `analysis` 时必须同时提供 `analysis_identity`。人工片段通过 `segments` 提供，保留自动分析原结果。
+`PreparedVocals` 保存实际 PCM SHA256、零点、配置及片段来源；`write_prepared` / `read_prepared`
+使用原始 float32 NumPy 数组和 `lazulite-prepared-v1` manifest，无量化或增益处理。
+行级 `AlignmentPipeline.run_prepared(prepared, document)` 复用准备产物。
+
+```sh
+lazulite prepare-vocals song.m4a --output-dir prepared --separator-device cpu
+lazulite prepare-vocals --vocals vocals.wav --original-id sha256:ORIGINAL_HASH --original-duration 180 --output-dir prepared
+```
+
+Demucs 显式记录 shifts=1、seed=0、split、overlap；分离后恢复调用方随机状态。
+这是一项新的可复现输入条件，不能与旧随机分离缓存混同。
