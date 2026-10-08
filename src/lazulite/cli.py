@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     japanese.add_argument("--model-path", type=Path, required=True, help="固定 NextFire 本地权重目录")
     japanese.add_argument("--device", default="cpu")
     japanese.add_argument("--cache", type=Path)
-    japanese.add_argument("--hint-mode", choices=("off", "auto"), default="off")
+    japanese.add_argument("--hint-mode", choices=("off", "auto"), default="auto")
     japanese.add_argument("--max-decode-memory-bytes", type=int, default=512*1024*1024)
     japanese.add_argument("--output", type=Path, required=True)
 

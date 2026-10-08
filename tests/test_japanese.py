@@ -83,3 +83,28 @@ def test_result_keeps_unknown_ids_manual_conflict_and_no_hidden_backend():
     assert result.status=='unresolved' and result.units[0].issues[0].code=='no_vocal_evidence'
     with pytest.raises(ValueError,match='duplicate'):
         JapaneseAlignmentRequest((request.lines[0],request.lines[0]))
+
+
+def test_hint_calibration_full_request_coverage_zero_and_deleted_gap():
+    from lazulite.models.japanese import StartHint,JapaneseUnitResult,Timing,Endpoint
+    from lazulite.alignment.japanese.calibration import calibrate
+    audio=AudioBuffer(np.zeros((1,160000),np.float32),16000,'a')
+    c=concatenate_cores(audio,(VocalSegment('s',None,0,10,0,10,None,None),))
+    lines=[];units=[];ranges={}
+    for i in range(8):
+        uid=str(i)
+        lines.append(JapaneseLine(uid,'あ',(JapaneseUnit(uid,(0,1),'あ','ja','user'),),StartHint(float(i),'edited')))
+        t=Timing(Endpoint(i+.2,'acoustic_path'),Endpoint(i+.5,'acoustic_path'))
+        units.append(JapaneseUnitResult(uid,uid,'あ','a',t,t))
+        ranges[uid]=(i,i+1)
+    req=JapaneseAlignmentRequest(tuple(lines))
+    anchors,r=calibrate(req,units,ranges,c)
+    assert len(anchors)==8 and r['delta_seconds']==.2 and anchors[0].frame==10
+    local=replace(req,lines=tuple(replace(l,start_hint=None) if i<2 or i>5 else l for i,l in enumerate(lines)))
+    assert calibrate(local,units,ranges,c)[1]['reason']=='local_support'
+    automatic=replace(req,lines=tuple(replace(l,start_hint=StartHint(float(i),'automatic','japanese')) for i,l in enumerate(lines)))
+    assert calibrate(automatic,units,ranges,c)[1]['reason']=='no_eligible_hints'
+    # Calibration does not snap corrected hints in deleted gaps.
+    c=concatenate_cores(audio,(VocalSegment('a',None,0,.1,0,.1,None,None),VocalSegment('b',None,2,10,2,10,None,None)))
+    assert calibrate(req,units,ranges,c)[1]['reason']=='insufficient_mapped_coverage'
+

@@ -16,7 +16,7 @@ from .kana import is_kana_text
 
 @dataclass(frozen=True, slots=True)
 class JapaneseConfig:
-    hint_mode: str = 'off'
+    hint_mode: str = 'auto'
     max_decode_memory_bytes: int = DEFAULT_MEMORY
     completion: bool = False
 
@@ -169,6 +169,23 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
                     issues=(JapaneseIssue(u.unit_id,reason),)) for l in request.lines for u in l.units)
     else:
         units=_units(request,texts,ranges,problems,spans,concat)
+    calibration={'mode':config.hint_mode,'adopted':'first_pass','reason':'hints_off'}
+    if spans is not None and config.hint_mode=='auto':
+        from .calibration import calibrate
+        checkpoint(cancel,event_sink,'calibration')
+        anchors,calibration=calibrate(request,units,ranges,concat)
+        calibration['mode']='auto'
+        execution['first_pass_id']=cache_key({'spans':spans,'request':execution['request_id']})
+        if anchors:
+            try:
+                second,score=decode(lp,tokens,anchors=anchors,max_decode_memory_bytes=config.max_decode_memory_bytes,
+                                    cancel=cancel,event_sink=event_sink)
+                units=_units(request,texts,ranges,problems,second,concat)
+                execution['second_pass_id']=cache_key({'spans':second,'anchors':[asdict(a) for a in anchors]})
+                execution['second_pass_score']=score
+                calibration['adopted']='second_pass'
+            except NoFeasiblePath:
+                calibration['reason']='second_pass_infeasible'
     issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in problems.values()) else []
     checkpoint(cancel,event_sink,'completed')
-    return _result(request,units,execution,{'mode':config.hint_mode,'adopted':'first_pass'},issues)
+    return _result(request,units,execution,calibration,issues)
