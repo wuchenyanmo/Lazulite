@@ -341,7 +341,7 @@ def align_lines(
         start_source=end_source=None
         if split is not None:
             start, end, similarity, source_ids, matched_text, start_source, end_source = split
-            source, issues = "model_units", ()
+            source, issues = ("acoustic_core", ("coarse_timing",)) if start_source==end_source=="acoustic_core" else ("model_units", ())
         elif len(linked_lines) == 1:
             start, end, source, issues = _timing(group)
         else:

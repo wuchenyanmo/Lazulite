@@ -227,3 +227,28 @@ def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: P
     assert candidates[0].match_score == 90.0
     assert fetched[0].lyrics.document.lines[0].text == "夜空を見上げて"
     assert ranked[0].content_score == 1.0
+
+
+def test_ttml_safe_roles_ruby_untimed_whitespace_and_snapshot_ids(tmp_path):
+    from lazulite.lyrics.ttml import read_ttml_for_japanese
+    p=tmp_path/'ruby.ttml'
+    p.write_text('<tt xmlns:tts="urn:style"><body><p begin="0ms"> <span tts:ruby="container"><span tts:ruby="base">海</span><span tts:ruby="text">うみ</span></span>  あ<span role="x-translation">sea</span><span role="x-bg">背景</span>!</p><p>かな</p></body></tt>')
+    doc=read_ttml_for_alignment(p)
+    ja=read_ttml_for_japanese(p)
+    assert doc.lines[0].text==' 海  あ!'
+    assert ja.lines[0].start_hint.time==0 and ja.lines[1].start_hint is None
+    assert ja.lines[0].units[0].reading=='うみ'
+    assert ja.lines[0].units[0].source_range==(1,2)
+    assert read_ttml_for_japanese(p)==ja
+    assert doc.lines[1].source_start is None
+
+
+def test_ttml_time_units_and_reject_relative_containers(tmp_path):
+    from lazulite.lyrics.ttml import _parse_time
+    import pytest
+    for value,expected in [('1.5',1.5),('1.5s',1.5),('1500ms',1.5),('1:02.5',62.5),('01:02:03.5',3723.5)]:
+        assert _parse_time(value,field='test')==expected
+    for value in ['NaN','2t','1:00:00:12','-1','inf']:
+        with pytest.raises(TtmlFormatError):_parse_time(value,field='test')
+    p=tmp_path/'relative.ttml';p.write_text('<tt><body begin="2s"><p>歌</p></body></tt>')
+    with pytest.raises(TtmlFormatError):read_ttml_for_alignment(p)

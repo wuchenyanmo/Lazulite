@@ -90,7 +90,7 @@ class NextFireBackend:
             from transformers import Wav2Vec2ForCTC
             self._torch = torch
             self._model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path, local_files_only=True,
-                                                       torch_dtype=torch.float32).to(self.config.device).eval()
+                                                       dtype=torch.float32).to(self.config.device).eval()
         def forward(y):
             t = self._torch
             with t.inference_mode():

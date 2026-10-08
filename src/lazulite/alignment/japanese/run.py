@@ -136,7 +136,7 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
     execution={'route':'japanese','profile':'ja-hepburn/2','ctc':CTC_VERSION,'config':asdict(config),
                'pcm_id':prepared.pcm_id,'original_id':prepared.original_id,'segment_source':prepared.segment_source,
                'auto_conflict':prepared.segment_source=='manual' and prepared.analysis.is_vocal is False,
-               'request_id':cache_key(asdict(request)), 'score_definition':'sum of frame log probabilities plus one-time entry penalties'}
+               'request_id':cache_key(asdict(request)), 'input':asdict(request), 'score_definition':'sum of frame log probabilities plus one-time entry penalties'}
     reason=None
     if prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False:
         reason='no_vocal_evidence'
@@ -160,7 +160,20 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
                 cache.set_array(acoustic_key,lp)
         execution['acoustic_id']=acoustic_key
         try:
-            spans,score=decode(lp,tokens, max_decode_memory_bytes=config.max_decode_memory_bytes,cancel=cancel,event_sink=event_sink)
+            decode_key=cache_key({'stage':'japanese-decode-v1','acoustic':acoustic_key,
+                                  'request':asdict(request),'profile':'ja-hepburn/2','ctc':CTC_VERSION}) if acoustic_key else None
+            cached=cache.get_json(decode_key) if cache is not None and decode_key else None
+            if cached is not None:
+                try:
+                    if cached['schema']!='ctc-path-v1':raise ValueError('schema')
+                    spans=[tuple(s) for s in cached['spans']];score=cached['score']
+                    if len(spans)!=len(tokens) or any(not 0<=a<b<=len(lp) for a,b in spans) or not np.isfinite(score):
+                        raise ValueError('invalid cached CTC path')
+                except (KeyError,TypeError,ValueError):cached=None
+            if cached is None:
+                spans,score=decode(lp,tokens, max_decode_memory_bytes=config.max_decode_memory_bytes,cancel=cancel,event_sink=event_sink)
+                if cache is not None and decode_key:
+                    cache.set_json(decode_key,{'schema':'ctc-path-v1','spans':spans,'score':score})
             execution['first_pass_score']=score
         except NoFeasiblePath:
             reason='no_feasible_path'

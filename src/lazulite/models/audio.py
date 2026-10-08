@@ -48,7 +48,9 @@ class AudioBuffer:
             raise ValueError("音频数组必须为 [channels, samples] 两维布局")
         if self.samples.shape[0] < 1:
             raise ValueError("音频至少需要一个声道")
-        if self.sample_rate <= 0:
+        if not np.isfinite(self.samples).all():
+            raise ValueError("PCM samples must be finite")
+        if type(self.sample_rate) is not int or self.sample_rate <= 0:
             raise ValueError("采样率必须为正数")
         if not self.source_id:
             raise ValueError("音频必须具有非空 source_id")

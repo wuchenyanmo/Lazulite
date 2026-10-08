@@ -62,6 +62,7 @@ class WhisperBackend:
         self._processor = AutoProcessor.from_pretrained(str(config.model_path))
         self.info = BackendInfo("whisper", config.model_id, config.revision, f"transformers {version('transformers')}; torch {torch.__version__}", config.precision)
         self._export_index = 0
+        self._content_identity = None
 
     @property
     def cache_identity(self) -> dict[str, object]:
@@ -69,7 +70,20 @@ class WhisperBackend:
         config = asdict(self._config)
         config["model_path"] = None
         config["distribution_output_dir"] = str(self._config.distribution_output_dir) if self._config.distribution_output_dir else None
-        return {"backend": asdict(self.info), "config": config}
+        if self._content_identity is None:
+            import hashlib
+            names=['model.safetensors','config.json','generation_config.json','tokenizer.json',
+                   'tokenizer_config.json','vocab.json','merges.txt','preprocessor_config.json','added_tokens.json']
+            root=Path(self._config.model_path)
+            if not (root/'model.safetensors').is_file():
+                return None  # No trusted content inventory for alternate layouts yet.
+            identity={}
+            for name in names:
+                path=root/name
+                if path.is_file():
+                    with path.open('rb') as stream:identity[name]=hashlib.file_digest(stream,'sha256').hexdigest()
+            self._content_identity=identity
+        return {"backend": asdict(self.info), "config": config, "files":self._content_identity}
 
     def _waveform(self, item: TranscriptionInput) -> np.ndarray:
         if item.audio.sample_rate != 16_000:
@@ -150,7 +164,7 @@ class WhisperBackend:
         probabilities={x.generation_step:float(np.exp(x.logprob)) for x in scores.scores}
         def summarize(steps):
             values=[probabilities[i] for i in steps if i in probabilities]
-            return ProbabilitySummary(float(np.mean(values)),min(values),sum(v<.2 for v in values)/len(values),len(values)) if values else None
+            return ProbabilitySummary(float(np.mean(values)),min(values),sum(v<.35 for v in values)/len(values),len(values)) if values else None
         from dataclasses import replace
         units=tuple(replace(u,probability=summarize(u.generation_steps)) for u in self._timed_text(ids,prefix,timestamps,item))
         metadata['unicode_groups']=[{'text':u.text,'generation_steps':list(u.generation_steps)} for u in units]

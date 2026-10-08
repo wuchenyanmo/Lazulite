@@ -177,3 +177,33 @@ def test_pipeline_recomputes_when_cached_full_distribution_was_removed(tmp_path)
     assert first.inputs
     assert second.inputs
     assert distribution.is_file()
+
+
+def test_transcription_cache_survives_alignment_policy_change_and_cancels(tmp_path):
+    import numpy as np
+    import pytest
+    from dataclasses import replace
+    from lazulite.models.audio import AudioBuffer,VocalSegment
+    from lazulite.models.transcription import BackendInfo,TranscriptionSegment
+    from lazulite.transcription.base import TranscriberCapabilities
+    from lazulite.transcription.run import transcribe_segments,TranscriptionConfig
+    from lazulite.transcription.evidence import EvidenceConfig
+    from lazulite.events import Cancelled
+    class Backend:
+        info=BackendInfo('fixture','model','r','v','f32')
+        capabilities=TranscriberCapabilities('none',False,30)
+        cache_identity={'files':{'model':'fixture-hash'}}
+        calls=0
+        def transcribe(self,inputs,*,request):
+            self.calls+=1
+            return tuple(TranscriptionSegment(i.segment.id,'hello',None,None,None,None,None,(),{}) for i in inputs)
+    b=Backend();audio=AudioBuffer(np.zeros((1,32000),np.float32),16000,'same-label')
+    segments=(VocalSegment('s',None,0,2,0,2,None,None),)
+    cache=FileCache(tmp_path)
+    transcribe_segments(audio,segments,transcriber=b,cache=cache)
+    transcribe_segments(audio,segments,transcriber=b,cache=cache,config=TranscriptionConfig(evidence=EvidenceConfig('whisper-lexical-v1')))
+    assert b.calls==1
+    audio.samples[:]=1
+    transcribe_segments(audio,segments,transcriber=b,cache=cache)
+    assert b.calls==2
+    with pytest.raises(Cancelled):transcribe_segments(audio,segments,transcriber=b,cache=cache,cancel=lambda:True)

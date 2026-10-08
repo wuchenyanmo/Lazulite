@@ -37,15 +37,31 @@ def prepare_existing_vocals(vocals: AudioBuffer, *, original_id: str, original_d
                           analysis_identity=identity)
 
 
-def prepare_vocals(original: AudioBuffer, *, separator, config: VocalConfig = VocalConfig()) -> PreparedVocals:
+def prepare_vocals(original: AudioBuffer, *, separator, config: VocalConfig = VocalConfig(),
+                   cache=None, cancel=None, event_sink=None) -> PreparedVocals:
+    from lazulite.cache import cache_key
+    from lazulite.events import checkpoint
     if separator is None:
         raise ValueError("original preparation requires an explicit separator; use prepare_existing_vocals for stems")
+    checkpoint(cancel,event_sink,'prepare')
+    identity=getattr(separator,'cache_identity',None)
+    identity=identity() if callable(identity) else identity
+    key=cache_key({'stage':'prepared-v1','original_pcm':pcm_identity(original),'original_id':original.source_id,
+                   'separator':identity,'analysis':ANALYSIS_VERSION,'config':asdict(config)}) if cache is not None and identity is not None else None
+    target=cache.root / ('prepared-'+key) if key is not None else None
+    if target is not None and (target/'manifest.json').is_file():
+        try:
+            return read_prepared(target/'manifest.json')
+        except (OSError,ValueError,KeyError,TypeError):
+            pass  # Invalid artifacts miss; recompute with the requested backend, never fallback.
     vocals = separator.separate(original)
-    identity = getattr(separator, "cache_identity", None)
-    identity = identity() if callable(identity) else identity
-    return prepare_existing_vocals(vocals, original_id=original.source_id, original_duration=original.duration,
-                                   reference=original, config=config,
-                                   separation={"kind": "separated", "identity": identity})
+    checkpoint(cancel,event_sink,'analysis')
+    prepared=prepare_existing_vocals(vocals, original_id=original.source_id, original_duration=original.duration,
+                                    reference=original, config=config,
+                                    separation={"kind": "separated", "identity": identity})
+    checkpoint(cancel)
+    if target is not None:write_prepared(prepared,target)
+    return prepared
 
 
 def write_prepared(prepared: PreparedVocals, directory: str | Path) -> Path:

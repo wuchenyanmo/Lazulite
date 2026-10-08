@@ -103,3 +103,26 @@ lazulite align-japanese --prepared prepared/manifest.json --targets units.json -
 CTC 默认回溯预算 512 MiB，滚动 float64 分数＋uint8 回溯；超限明确失败。
 声学块间与每 128 帧解码检查取消回调，抛出 `events.Cancelled`。
 固定 profile/假名计算的 MIT 来源及许可见 `THIRD_PARTY_LICENSES`。
+
+### 输入、状态与证据
+
+日语默认 `hint_mode="auto"`，只在外部行首通过投票、完整请求前后覆盖和漂移门控后执行第二遍；
+否则返回首遍。提示在删除间隔内不吸附。默认启用局部补全；`--without-completion` 可单独观察基线。
+TTML 可用 `--ttml lyrics.ttml` 替代 `--targets units.json`，支持无行时间、Ruby 和秒/ms/时钟值；
+翻译、音译、背景不进入正文。不支持 tick/frame 或带时间的父容器，明确报错。
+未知汉字保持缺读音；快照生成的单元 ID 不保证跨文本修改稳定。
+
+行级结果提供 `status`、`coverage`、`issue_counts` 和起止各自来源；`offset_accepted` 只用于 offset 接受决策，
+不是泛化准确率。`reliable` 已移除，旧缓存直接失效。Whisper 每个实际窗口有独立 ID、可空 core 交集，
+原始生成时间、Unicode/BPE 步映射、停止原因保存在证据中，派生 end 不改写原始数组。
+`--max-new-tokens` 默认 128，可显式设 256。`--evidence-policy generic|whisper-lexical-v1` 控制统一风险公式；
+缺失概率摘要不受 Whisper 阈值惩罚。
+
+```sh
+lazulite align lyrics.ttml --prepared prepared/manifest.json --backend whisper --model-path /path/to/whisper-large-v3 --revision MODEL_REVISION --device cpu --mode dp --max-new-tokens 128 --output lines.json
+```
+
+`FileCache` 按人声准备、实际转写请求、日语声学概率和原始解码路径分别复用。数组先写完整内容再原子发布 manifest，
+坏文件不能命中。改 DP 配置可复用转写，改读音可复用日语声学概率。外部后端没有可信 `cache_identity` 时禁用模型产物缓存。
+`AlignmentPipeline(..., cancel=callback)` 与 `align_japanese(..., cancel=callback)` 的取消回调返回 true 时抛出 `Cancelled`；
+模型内部单次前向不抢占，块/请求间检查；取消不会发布最终成功结果。

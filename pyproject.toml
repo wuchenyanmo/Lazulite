@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lazulite"
-version = "0.1.0"
-description = "用于歌词搜索、转写证据与行级对齐的自动化引擎"
+version = "0.2.0"
+description = "独立人声准备、行级证据与日语全局词级对齐引擎"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -42,8 +42,7 @@ forced-qwen = [
 ]
 vocal = [
     "demucs==4.0.1",
-    "librosa==0.11.0",
-    "scipy==1.17.1",
+    "scipy==1.18.1",
     "torch>=2.6",
 ]
 dev = [

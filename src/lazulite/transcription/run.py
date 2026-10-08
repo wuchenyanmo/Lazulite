@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Literal
 from .evidence import transcription_quality, EvidenceConfig, repetition, eligible_for_transcription
 
-from lazulite.models.audio import AudioBuffer, VocalSegment
-from lazulite.models.transcription import TranscriptionResult, RequestWindow
+from lazulite.models.audio import AudioBuffer, VocalSegment, pcm_identity
+from lazulite.models.transcription import TranscriptionResult, RequestWindow, transcription_segment_from_dict
 from lazulite.cache import cache_key
 
 from .base import Transcriber, TranscriptionInput, TranscriptionRequest
@@ -84,6 +84,7 @@ def transcribe_segments(
     transcriber: Transcriber,
     request: TranscriptionRequest | None = None,
     config: TranscriptionConfig = TranscriptionConfig(),
+    cache=None, cancel=None, event_sink=None,
 ) -> TranscriptionResult:
     """调用已注入的后端，并在边界检查它返回的证据关联。"""
     effective_request = request or TranscriptionRequest()
@@ -104,6 +105,43 @@ def transcribe_segments(
     )
     if not inputs:
         return TranscriptionResult(transcriber.info, ())
+    from lazulite.events import checkpoint
+    identity=getattr(transcriber,'cache_identity',None)
+    identity=identity() if callable(identity) else identity
+    pcm=pcm_identity(audio) if cache is not None and identity is not None else None
+    completed=0
+    def generate(batch, request):
+        nonlocal completed
+        # Preserve batch behavior without cache; with cache, each exact request is independent.
+        checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
+        if cache is None or identity is None:
+            values=transcriber.transcribe(batch,request=request)
+            completed+=len(batch)
+            checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
+            return values
+        values=[]
+        for item in batch:
+            key=cache_key({'schema':'transcription-request-v1','pcm':pcm,'window':asdict(item.segment),
+                           'backend':identity,'request':asdict(request)})
+            entry=cache.get_json(key)
+            value=None
+            if entry is not None and entry.get('schema')=='transcription-request-v1':
+                try:
+                    value=transcription_segment_from_dict(entry['value'])
+                    target=value.backend_metadata.get('distribution_file')
+                    if target is not None:
+                        from pathlib import Path
+                        if not Path(target).is_file():value=None
+                except (ValueError,TypeError,KeyError):value=None
+            if value is None:
+                output=transcriber.transcribe((item,),request=request)
+                if len(output)!=1:raise ValueError('one result per request required')
+                value=_bind(item,output[0],request,request.context)
+                checkpoint(cancel)
+                cache.set_json(key,{'schema':'transcription-request-v1','value':asdict(value)})
+            values.append(value);completed+=1
+            checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
+        return tuple(values)
     contextual = (
         transcriber.capabilities.context and not effective_request.include_timing
     )
@@ -112,7 +150,7 @@ def transcribe_segments(
         output = []
         for item in inputs:
             prompt = _context(history, item.segment, config, effective_request.context)
-            result = transcriber.transcribe(
+            result = generate(
                 (item,), request=replace(effective_request, context=prompt)
             )
             if len(result)!=1:
@@ -122,7 +160,7 @@ def transcribe_segments(
             if transcription_quality(segment,item.segment,config.evidence).risk < .42:
                 history.append(repetition(segment.text)[1])
     else:
-        output = transcriber.transcribe(
+        output = generate(
             inputs, request=replace(effective_request, context=None)
         )
         if len(output)!=len(inputs):

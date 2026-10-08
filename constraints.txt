@@ -1,3 +1,8 @@
 # 经 ASR 探针验证的生产模型栈版本；CUDA wheel 来源由部署环境选择。
 qwen-asr==0.0.6
 transformers==4.57.6
+# 独立重构已实测的 Python 3.12 CPU/CUDA 模型环境。
+numpy==2.5.2
+torch==2.14.0
+scipy==1.18.1
+demucs==4.0.1

@@ -60,3 +60,16 @@ def test_external_analysis_requires_provenance_and_rejects_bad_ranges():
     with pytest.raises(ValueError, match='outside'):
         prepare_existing_vocals(audio, original_id='original', original_duration=1,
             analysis=bad, analysis_identity={'reference':'none'})
+
+
+def test_array_cache_rejects_missing_corrupt_and_unpublished_files(tmp_path):
+    from lazulite.cache import FileCache
+    cache=FileCache(tmp_path)
+    np.save(tmp_path/'orphan.npy',np.ones(3))
+    assert cache.get_array('orphan') is None
+    cache.set_array('a',np.arange(6,dtype=np.float32))
+    np.testing.assert_array_equal(cache.get_array('a'),np.arange(6,dtype=np.float32))
+    path=tmp_path/cache.get_json('a')['resource'];path.write_bytes(b'broken')
+    assert cache.get_array('a') is None
+    path.unlink()
+    assert cache.get_array('a') is None

@@ -81,7 +81,7 @@ class ProbabilitySummary:
     minimum: float
     low_fraction: float
     count: int
-    threshold: float = .2
+    threshold: float = .35
     definition: str = 'lexical_generation_probabilities-v1'
 
     def __post_init__(self):
@@ -122,3 +122,13 @@ class TranscriptionSegment:
 class TranscriptionResult:
     backend: BackendInfo
     segments: tuple[TranscriptionSegment, ...]
+
+
+def transcription_segment_from_dict(value):
+    """Read only the current schema's complete evidence; never upgrade legacy cache rows."""
+    return TranscriptionSegment(**{**value,
+        'request_window':RequestWindow(**value['request_window']) if value['request_window'] is not None else None,
+        'probability':ProbabilitySummary(**value['probability']) if value['probability'] is not None else None,
+        'issues':tuple(value['issues']),
+        'timed_text':tuple(TimedText(**{**u,'generation_steps':tuple(u['generation_steps']),
+            'probability':ProbabilitySummary(**u['probability']) if u['probability'] is not None else None}) for u in value['timed_text'])})

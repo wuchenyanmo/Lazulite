@@ -72,13 +72,17 @@ class AlignmentPipeline:
         separator: Separator | None = None,
         cache: FileCache | None = None,
         event_sink: EventSink | None = None,
+        cancel=None,
     ) -> None:
         self._transcriber = transcriber
         self._separator = separator
         self._cache = cache
         self._event_sink = event_sink
+        self._cancel = cancel
 
     def _emit(self, stage: str, kind: str, message: str | None = None) -> None:
+        from lazulite.events import checkpoint
+        checkpoint(self._cancel)
         if self._event_sink:
             self._event_sink(ProgressEvent(stage, kind, message=message))
 
@@ -221,7 +225,7 @@ class AlignmentPipeline:
         config: PipelineConfig = PipelineConfig(),
     ) -> PipelineResult:
         prepared = (
-            prepare_vocals(audio, separator=self._separator, config=config.vocal)
+            prepare_vocals(audio, separator=self._separator, config=config.vocal, cache=self._cache, cancel=self._cancel, event_sink=self._event_sink)
             if self._separator is not None else
             prepare_existing_vocals(audio, original_id=audio.source_id,
                                     original_duration=audio.duration, config=config.vocal)
@@ -232,6 +236,8 @@ class AlignmentPipeline:
         self, prepared: PreparedVocals, document: LyricDocument, *,
         config: PipelineConfig = PipelineConfig(),
     ) -> PipelineResult:
+        from lazulite.events import checkpoint
+        checkpoint(self._cancel)
         prepared.__post_init__()
         audio = vocals = prepared.vocals
         analysis = replace(prepared.analysis, segments=prepared.segments)
@@ -329,6 +335,7 @@ class AlignmentPipeline:
                     language=config.language, include_timing=include_timing
                 ),
                 config=run_config,
+                cache=self._cache, cancel=self._cancel, event_sink=self._event_sink,
             )
 
         preselected = config.mode in {"offset", "auto"} and has_complete_source_times

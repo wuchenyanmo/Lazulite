@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from typing import Literal
 
@@ -78,22 +78,19 @@ class LineAlignmentResult:
     anchors: tuple[AlignmentAnchor, ...]
     diagnostics: tuple[str, ...] = ()
 
-    @property
-    def coverage(self):
-        complete=sum(l.start is not None and l.end is not None and l.start<l.end for l in self.lines)
-        single=sum((l.start is None)!=(l.end is None) for l in self.lines)
-        return {'total':len(self.lines),'matched':sum(bool(l.source_segment_ids) for l in self.lines),
-                'complete':complete,'single_endpoint':single,'unresolved':len(self.lines)-complete-single}
+    coverage: dict = field(init=False)
+    status: str = field(init=False)
+    issue_counts: dict = field(init=False)
 
-    @property
-    def status(self):
-        c=self.coverage
-        return 'complete' if c['total'] and c['complete']==c['total'] else 'partial' if c['complete'] or c['single_endpoint'] else 'unresolved'
-
-    @property
-    def issue_counts(self):
+    def __post_init__(self):
         from collections import Counter
-        return dict(Counter(issue for line in self.lines for issue in line.issues))
+        complete=sum(bool(l.start is not None and l.end is not None and l.start<l.end) for l in self.lines)
+        single=sum((l.start is None)!=(l.end is None) for l in self.lines)
+        coverage={'total':len(self.lines),'matched':sum(bool(l.source_segment_ids) for l in self.lines),
+                  'complete':complete,'single_endpoint':single,'unresolved':len(self.lines)-complete-single}
+        object.__setattr__(self,'coverage',coverage)
+        object.__setattr__(self,'status','complete' if self.lines and complete==len(self.lines) else 'partial' if complete or single else 'unresolved')
+        object.__setattr__(self,'issue_counts',dict(Counter(issue for line in self.lines for issue in line.issues)))
 
 
 @dataclass(frozen=True, slots=True)

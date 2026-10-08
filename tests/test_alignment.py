@@ -116,3 +116,18 @@ def test_line_coverage_is_not_a_reliability_promise():
     assert result.status=='partial'
     assert result.coverage=={'total':2,'matched':1,'complete':0,'single_endpoint':1,'unresolved':1}
     assert not hasattr(result,'reliable')
+
+
+def test_mixed_real_units_and_coarse_blocks_keep_boundary_provenance():
+    from lazulite.models.lyrics import LyricDocument,LyricLine
+    from lazulite.models.audio import VocalSegment,VocalAnalysis
+    from lazulite.models.transcription import BackendInfo,TranscriptionResult,TranscriptionSegment,TimedText
+    from lazulite.alignment.line import align_lines
+    info=BackendInfo('test','m','r','v','f32')
+    a=VocalSegment('a',None,0,2,.5,1.5,None,None);b=VocalSegment('b',None,3,5,3.5,4.5,None,None)
+    tr=TranscriptionResult(info,(
+        TranscriptionSegment('a','first',None,None,None,None,None,(TimedText('first',.7,1.2,'word','model'),),{}),
+        TranscriptionSegment('b','second',None,None,None,None,None,(),{})))
+    result=align_lines(LyricDocument((LyricLine('a','first'),LyricLine('b','second'))),tr,VocalAnalysis('x',(a,b)))
+    assert (result.lines[0].start,result.lines[0].end)==(.7,1.2)
+    assert result.lines[1].start_source==result.lines[1].end_source=='acoustic_core'

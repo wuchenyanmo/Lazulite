@@ -19,8 +19,13 @@ class DemucsConfig:
     overlap: float = 0.25
     shifts: int = 1
     seed: int = 0
+    transition_power: float = 1.0
+    num_workers: int = 0
+    segment: float | None = None
 
     def __post_init__(self) -> None:
+        if self.transition_power < 1 or self.num_workers < 0 or self.segment is not None and self.segment <= 0:
+            raise ValueError("invalid Demucs execution parameters")
         if self.shifts < 0:
             raise ValueError("Demucs shifts must be nonnegative")
         if not 0 <= self.overlap < 1:
@@ -51,8 +56,17 @@ class DemucsSeparator:
     @property
     def cache_identity(self) -> dict[str, object] | None:
         """未指定权重身份时不允许缓存分离后的自动化结果。"""
-        if not self._config.model_revision:
-            return None
+        # Hash loaded tensors, not a caller-declared model label. Loading is lazy and
+        # belongs to preparation; import/help never touches this property.
+        model = self._load()
+        if not hasattr(self, '_weights_identity'):
+            import hashlib
+            digest=hashlib.sha256()
+            for name,tensor in sorted(model.state_dict().items()):
+                value=tensor.detach().cpu().contiguous()
+                digest.update(name.encode());digest.update(str(value.dtype).encode())
+                digest.update(str(tuple(value.shape)).encode());digest.update(value.numpy().tobytes())
+            self._weights_identity='sha256:'+digest.hexdigest()
         def installed(package: str) -> str:
             try:
                 return version(package)
@@ -60,6 +74,8 @@ class DemucsSeparator:
                 return "unavailable"
         return {
             "separator": "demucs",
+            "weights":self._weights_identity,
+            "model_segment":getattr(model,"segment",None),
             "runtime_version": f"demucs {installed('demucs')}; torch {installed('torch')}",
             "config": asdict(self._config),
         }
@@ -75,7 +91,8 @@ class DemucsSeparator:
             with self._torch.inference_mode():
                 sources = self._apply_model(model, waveform, device=self._config.device, progress=False,
                                             split=self._config.split, overlap=self._config.overlap,
-                                            shifts=self._config.shifts)
+                                            shifts=self._config.shifts, transition_power=self._config.transition_power,
+                                            num_workers=self._config.num_workers, segment=self._config.segment)
         finally:
             random.setstate(state)
         vocals = sources[0, model.sources.index("vocals")].detach().float().cpu().numpy()
@@ -84,3 +101,5 @@ class DemucsSeparator:
     def close(self) -> None:
         # 由调用方决定是否清空 CUDA allocator，库仅结束本实例的模型所有权。
         self._model = None
+        if hasattr(self,"_weights_identity"):
+            del self._weights_identity

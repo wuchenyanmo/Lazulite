@@ -25,3 +25,16 @@ def test_cli_returns_a_concise_nonzero_error_for_missing_input(tmp_path) -> None
 
     assert main(["lyrics", "search", "missing.m4a", "--output", str(output)]) == 2
     assert not output.exists()
+
+
+def test_prepared_inputs_are_explicit_and_invalid_request_precedes_model(tmp_path):
+    import json
+    import pytest
+    parser=build_parser()
+    args=parser.parse_args(['align','lyrics.ttml','--prepared','manifest.json','--backend','whisper','--model-path','absent','--revision','r','--output','out.json'])
+    assert args.audio is None and str(args.lyrics)=='lyrics.ttml'
+    with pytest.raises(SystemExit):
+        parser.parse_args(['align-japanese','--audio','song.wav','--prepared','manifest.json','--targets','units.json','--model-path','absent','--output','out.json'])
+    target=tmp_path/'invalid.json';target.write_text(json.dumps({'schema':'wrong'}))
+    assert main(['align-japanese','--prepared','absent','--targets',str(target),'--model-path','absent','--output',str(tmp_path/'out.json')])==2
+    assert not (tmp_path/'out.json').exists()

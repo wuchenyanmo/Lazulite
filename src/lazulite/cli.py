@@ -52,7 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     source = japanese.add_mutually_exclusive_group(required=True)
     source.add_argument("--prepared", type=Path, help="已准备人声 manifest.json")
     source.add_argument("--audio", type=Path, help="原曲音频（自动 Demucs 准备）")
-    japanese.add_argument("--targets", type=Path, required=True, help="lazulite-japanese-request-v1 JSON")
+    target = japanese.add_mutually_exclusive_group(required=True)
+    target.add_argument("--targets", type=Path, help="lazulite-japanese-request-v1 JSON")
+    target.add_argument("--ttml", type=Path, help="TTML 正文与 Ruby 最小投影")
+    japanese.add_argument("--without-completion", action="store_true", help="只输出固定 profile 原始路线")
     japanese.add_argument("--model-path", type=Path, required=True, help="固定 NextFire 本地权重目录")
     japanese.add_argument("--device", default="cpu")
     japanese.add_argument("--cache", type=Path)
@@ -75,14 +78,16 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--output", type=Path, required=True)
 
     align = commands.add_parser("align", help="将 TTML 歌词行与音频对齐")
-    align.add_argument("audio", type=Path)
+    align.add_argument("audio", type=Path, nargs="?", help="原曲音频，与 --prepared 互斥")
+    align.add_argument("--prepared", type=Path, help="复用已准备的人声 manifest")
+    align.add_argument("--cache", type=Path)
+    align.add_argument("--evidence-policy", choices=("generic", "whisper-lexical-v1"), default="generic")
     align.add_argument("lyrics", type=Path)
     _add_backend_options(align)
     align.add_argument("--language")
     align.add_argument("--mode", choices=("dp", "offset", "hybrid", "auto"), default="auto")
-    align.add_argument("--without-separation", action="store_true", help="跳过 Demucs，仅用于已有分离人声或诊断")
-    align.add_argument("--separator-model", default="htdemucs")
-    align.add_argument("--separator-device", default="cuda")
+    align.add_argument("--separator-model")
+    align.add_argument("--separator-device")
     align.add_argument("--output", type=Path, required=True)
 
     forced = commands.add_parser("forced-align", help="用已确认文本执行独立 forced alignment")
@@ -130,7 +135,11 @@ def _run_japanese(arguments: argparse.Namespace) -> int:
     from .alignment.japanese.run import align_japanese, JapaneseConfig
     from .cache import FileCache
     # Structural errors are rejected before constructing/loading any model.
-    request = JapaneseAlignmentRequest.from_dict(json.loads(arguments.targets.read_text("utf-8")))
+    if arguments.targets is not None:
+        request = JapaneseAlignmentRequest.from_dict(json.loads(arguments.targets.read_text("utf-8")))
+    else:
+        from .lyrics.ttml import read_ttml_for_japanese
+        request = read_ttml_for_japanese(arguments.ttml)
     if arguments.prepared is not None:
         prepared = read_prepared(arguments.prepared)
     else:
@@ -143,7 +152,7 @@ def _run_japanese(arguments: argparse.Namespace) -> int:
     backend = NextFireBackend(NextFireConfig(arguments.model_path, arguments.device))
     try:
         result = align_japanese(prepared, request, backend=backend,
-            config=JapaneseConfig(hint_mode=arguments.hint_mode, max_decode_memory_bytes=arguments.max_decode_memory_bytes),
+            config=JapaneseConfig(hint_mode=arguments.hint_mode, max_decode_memory_bytes=arguments.max_decode_memory_bytes, completion=not arguments.without_completion),
             cache=FileCache(arguments.cache) if arguments.cache else None)
         _write_json(arguments.output, asdict(result))
     finally:
@@ -212,24 +221,37 @@ def _run_transcribe(arguments: argparse.Namespace) -> int:
 
 def _run_align(arguments: argparse.Namespace) -> int:
     from .audio.io import decode_audio
+    from .audio.preparation import read_prepared
     from .lyrics.ttml import read_ttml_for_alignment
     from .pipeline import AlignmentPipeline, PipelineConfig
-
-    backend = _build_transcriber(arguments)
-    separator = None
+    from .alignment.line import LineAlignmentConfig
+    from .alignment.offset import OffsetAlignmentConfig
+    from .transcription.run import TranscriptionConfig
+    from .transcription.evidence import EvidenceConfig
+    from .cache import FileCache
+    if (arguments.audio is None)==(arguments.prepared is None):
+        raise ValueError("必须且只能提供原曲 audio 或 --prepared manifest")
+    if arguments.prepared is not None and (arguments.separator_model is not None or arguments.separator_device is not None):
+        raise ValueError("prepared 输入不接受分离参数")
+    document=read_ttml_for_alignment(arguments.lyrics)
+    prepared=read_prepared(arguments.prepared) if arguments.prepared is not None else None
+    backend=_build_transcriber(arguments)
+    separator=None
     try:
-        if not arguments.without_separation:
-            from .audio.separation import DemucsConfig, DemucsSeparator
-            separator = DemucsSeparator(DemucsConfig(arguments.separator_model, arguments.separator_device))
-        result = AlignmentPipeline(transcriber=backend, separator=separator).run(
-            decode_audio(arguments.audio, sample_rate=44_100, channels=2),
-            read_ttml_for_alignment(arguments.lyrics),
-            config=PipelineConfig(mode=arguments.mode, language=arguments.language),
-        )
-        _write_json(arguments.output, {**asdict(result.alignment), "status":result.alignment.status, "coverage":result.alignment.coverage, "issue_counts":result.alignment.issue_counts})
+        if prepared is None:
+            from .audio.separation import DemucsConfig,DemucsSeparator
+            separator=DemucsSeparator(DemucsConfig(arguments.separator_model or 'htdemucs',arguments.separator_device or 'cuda'))
+        evidence=EvidenceConfig(arguments.evidence_policy)
+        config=PipelineConfig(mode=arguments.mode,language=arguments.language,
+            line=LineAlignmentConfig(evidence=evidence),offset=OffsetAlignmentConfig(evidence=evidence),
+            transcription=TranscriptionConfig(evidence=evidence))
+        pipeline=AlignmentPipeline(transcriber=backend,separator=separator,cache=FileCache(arguments.cache) if arguments.cache else None)
+        result=pipeline.run_prepared(prepared,document,config=config) if prepared is not None else pipeline.run(
+            decode_audio(arguments.audio,sample_rate=44100,channels=2),document,config=config)
+        _write_json(arguments.output,{**asdict(result.alignment),'status':result.alignment.status,
+            'coverage':result.alignment.coverage,'issue_counts':result.alignment.issue_counts})
     finally:
-        if separator is not None:
-            separator.close()
+        if separator is not None:separator.close()
         backend.close()
     return 0
 
