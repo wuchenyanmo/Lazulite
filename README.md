@@ -86,3 +86,20 @@ lazulite prepare-vocals --vocals vocals.wav --original-id sha256:ORIGINAL_HASH -
 
 Demucs 显式记录 shifts=1、seed=0、split、overlap；分离后恢复调用方随机状态。
 这是一项新的可复现输入条件，不能与旧随机分离缓存混同。
+
+### 独立日语全局 CTC
+
+安装 `lazulite[japanese]`；原曲分离另需 `vocal`。NextFire 权重固定为
+`2ab2b5f46539ee284703c281f286b01d2410ee12`，本地文件逐项校验 SHA256。
+`models.japanese.JapaneseAlignmentRequest` 明确传入正文 code point 范围、读音、语言及来源。
+`alignment.japanese.run.align_japanese` 不构造 Whisper，不消费行级 DP。
+空读音保留 ID；`null` 端点代表没有新建议，不代表删除旧值。
+
+```sh
+lazulite align-japanese --prepared prepared/manifest.json --targets units.json --model-path /path/to/NextFire --device cpu --hint-mode off --output result.json
+```
+
+结果 schema 为 `lazulite-japanese-result-v1`：原始路径、建议端点、原轴 fragments、拼接区间、问题和覆盖分别保存。
+CTC 默认回溯预算 512 MiB，滚动 float64 分数＋uint8 回溯；超限明确失败。
+声学块间与每 128 帧解码检查取消回调，抛出 `events.Cancelled`。
+固定 profile/假名计算的 MIT 来源及许可见 `THIRD_PARTY_LICENSES`。

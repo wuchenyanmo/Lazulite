@@ -9,7 +9,7 @@ description = "用于歌词搜索、转写证据与行级对齐的自动化引�
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Lazulite contributors" }]
 dependencies = [
     "fuzzywuzzy>=0.18,<1",
@@ -21,6 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+japanese = [
+    "torch>=2.6",
+    "transformers==4.57.6",
+]
+
 whisper = [
     "torch>=2.6",
     "transformers==4.57.6",

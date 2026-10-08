@@ -47,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--separator-revision")
     prepare.add_argument("--output-dir", type=Path, required=True)
 
+    japanese = commands.add_parser("align-japanese", help="独立日语全局词级对齐")
+    source = japanese.add_mutually_exclusive_group(required=True)
+    source.add_argument("--prepared", type=Path, help="已准备人声 manifest.json")
+    source.add_argument("--audio", type=Path, help="原曲音频（自动 Demucs 准备）")
+    japanese.add_argument("--targets", type=Path, required=True, help="lazulite-japanese-request-v1 JSON")
+    japanese.add_argument("--model-path", type=Path, required=True, help="固定 NextFire 本地权重目录")
+    japanese.add_argument("--device", default="cpu")
+    japanese.add_argument("--cache", type=Path)
+    japanese.add_argument("--hint-mode", choices=("off", "auto"), default="off")
+    japanese.add_argument("--max-decode-memory-bytes", type=int, default=512*1024*1024)
+    japanese.add_argument("--output", type=Path, required=True)
+
     lyrics = commands.add_parser("lyrics", help="从在线来源搜索歌词候选")
     lyric_commands = lyrics.add_subparsers(dest="lyrics_command", required=True)
     search = lyric_commands.add_parser("search", help="读取音频元数据并搜索歌词")
@@ -106,6 +118,35 @@ def _build_transcriber(arguments: argparse.Namespace):
         top_k=arguments.top_k,
         distribution_output_dir=distributions,
     ))
+
+
+def _run_japanese(arguments: argparse.Namespace) -> int:
+    from .models.japanese import JapaneseAlignmentRequest
+    from .audio.preparation import read_prepared, prepare_vocals
+    from .audio.io import decode_audio
+    from .alignment.japanese.backend import NextFireBackend, NextFireConfig
+    from .alignment.japanese.run import align_japanese, JapaneseConfig
+    from .cache import FileCache
+    # Structural errors are rejected before constructing/loading any model.
+    request = JapaneseAlignmentRequest.from_dict(json.loads(arguments.targets.read_text("utf-8")))
+    if arguments.prepared is not None:
+        prepared = read_prepared(arguments.prepared)
+    else:
+        from .audio.separation import DemucsSeparator, DemucsConfig
+        separator = DemucsSeparator(DemucsConfig(device=arguments.device))
+        try:
+            prepared = prepare_vocals(decode_audio(arguments.audio, sample_rate=44100, channels=2), separator=separator)
+        finally:
+            separator.close()
+    backend = NextFireBackend(NextFireConfig(arguments.model_path, arguments.device))
+    try:
+        result = align_japanese(prepared, request, backend=backend,
+            config=JapaneseConfig(hint_mode=arguments.hint_mode, max_decode_memory_bytes=arguments.max_decode_memory_bytes),
+            cache=FileCache(arguments.cache) if arguments.cache else None)
+        _write_json(arguments.output, asdict(result))
+    finally:
+        backend.close()
+    return 0
 
 
 def _run_prepare(arguments: argparse.Namespace) -> int:
@@ -215,6 +256,7 @@ def _run_forced_alignment(arguments: argparse.Namespace) -> int:
 
 
 _HANDLERS: dict[tuple[str, str | None], Callable[[argparse.Namespace], int]] = {
+    ("align-japanese", None): _run_japanese,
     ("prepare-vocals", None): _run_prepare,
     ("lyrics", "search"): _run_lyrics_search,
     ("transcribe", None): _run_transcribe,
