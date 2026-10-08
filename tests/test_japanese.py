@@ -108,3 +108,26 @@ def test_hint_calibration_full_request_coverage_zero_and_deleted_gap():
     c=concatenate_cores(audio,(VocalSegment('a',None,0,.1,0,.1,None,None),VocalSegment('b',None,2,10,2,10,None,None)))
     assert calibrate(req,units,ranges,c)[1]['reason']=='insufficient_mapped_coverage'
 
+
+def test_completion_interpolates_only_same_piece_and_keeps_raw_cross_gap():
+    from lazulite.models.japanese import JapaneseUnitResult,Timing,Endpoint,Fragment
+    from lazulite.alignment.japanese.completion import complete_units
+    audio=AudioBuffer(np.zeros((1,160000),np.float32),16000,'a')
+    concat=concatenate_cores(audio,tuple(VocalSegment(str(i),None,a,b,a,b,None,None) for i,(a,b) in enumerate([(0,4),(8,10)])))
+    req=JapaneseAlignmentRequest((JapaneseLine('l','あいう',tuple(JapaneseUnit(str(i),(i,i+1),'あ','ja','user') for i in range(3))),))
+    def unit(i,a=None,b=None,**kw):
+        t=Timing(Endpoint(a,'acoustic_path') if a is not None else None,Endpoint(b,'acoustic_path') if b is not None else None)
+        return JapaneseUnitResult(str(i),'l','あ','a',t,t,**kw)
+    us=(unit(0,0,1),unit(1),unit(2,3,4))
+    out=complete_units(req,us,concat,10)
+    assert out[0]==us[0] and out[2]==us[2] and out[1].raw_timing==Timing()
+    assert (out[1].proposed_timing.start.time,out[1].proposed_timing.end.time)==(1,3)
+    assert out[1].proposed_timing.start.source=='interpolated'
+    us=(unit(0,0,1),unit(1),unit(2,8,9))
+    assert complete_units(req,us,concat,10)[1].proposed_timing==Timing()
+    cross=replace(unit(1,2,9),proposed_timing=Timing(),fragments=(Fragment(2,4,0),Fragment(8,9,1)),crosses_removed_gap=True)
+    us=(unit(0,0,1),cross,unit(2,9,10))
+    assert complete_units(req,us,concat,10)[1].proposed_timing==Timing()
+    us=(unit(0,8,8.2),cross,unit(2,9,10))
+    out=complete_units(req,us,concat,10)
+    assert out[1].proposed_timing.start.time==8.2 and out[1].raw_timing==cross.raw_timing

@@ -18,7 +18,7 @@ from .kana import is_kana_text
 class JapaneseConfig:
     hint_mode: str = 'auto'
     max_decode_memory_bytes: int = DEFAULT_MEMORY
-    completion: bool = False
+    completion: bool = True
 
     def __post_init__(self):
         if self.hint_mode not in {'off','auto'} or self.max_decode_memory_bytes <= 0:
@@ -186,6 +186,11 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
                 calibration['adopted']='second_pass'
             except NoFeasiblePath:
                 calibration['reason']='second_pass_infeasible'
+    if spans is not None and config.completion:
+        from .completion import complete_units, VERSION as COMPLETION_VERSION
+        checkpoint(cancel,event_sink,'completion')
+        units=complete_units(request,units,concat,prepared.original_duration)
+        execution['completion']=COMPLETION_VERSION
     issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in problems.values()) else []
     checkpoint(cancel,event_sink,'completed')
     return _result(request,units,execution,calibration,issues)
