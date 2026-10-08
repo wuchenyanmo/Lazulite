@@ -52,14 +52,16 @@ class WhisperBackend:
     def __init__(self, config: WhisperConfig) -> None:
         try:
             import torch
-            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
         except ImportError as error:
             raise RuntimeError("Whisper 后端需要安装 lazulite[whisper] 与匹配的 CUDA Torch") from error
         self._torch = torch
         self._config = config
         dtype = getattr(torch, config.precision)
-        self._model = AutoModelForSpeechSeq2Seq.from_pretrained(str(config.model_path), dtype=dtype, attn_implementation=config.attention_implementation).to(config.device).eval()
-        self._processor = AutoProcessor.from_pretrained(str(config.model_path))
+        from lazulite._runtime import preserve_loading_random_state
+        with preserve_loading_random_state(torch):
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+            self._model = AutoModelForSpeechSeq2Seq.from_pretrained(str(config.model_path), dtype=dtype, attn_implementation=config.attention_implementation).to(config.device).eval()
+            self._processor = AutoProcessor.from_pretrained(str(config.model_path))
         self.info = BackendInfo("whisper", config.model_id, config.revision, f"transformers {version('transformers')}; torch {torch.__version__}", config.precision)
         self._export_index = 0
         self._content_identity = None

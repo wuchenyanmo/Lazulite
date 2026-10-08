@@ -133,3 +133,24 @@ def test_actual_windows_keep_parent_and_padding_only_core_empty():
     assert inputs[0].segment.core_start is None and inputs[0].segment.core_end is None
     assert (inputs[1].segment.start,inputs[1].segment.end)==(30,40)
     assert (inputs[1].segment.core_start,inputs[1].segment.core_end)==(32,38)
+
+
+def test_model_loading_restores_python_rng_even_on_failure():
+    import random
+    from contextlib import contextmanager
+    from lazulite._runtime import preserve_loading_random_state
+    calls=[]
+    class Torch:
+        class random:
+            @staticmethod
+            @contextmanager
+            def fork_rng(*,devices):
+                calls.append(('enter',devices))
+                try:yield
+                finally:calls.append(('exit',devices))
+    state=random.getstate()
+    with pytest.raises(RuntimeError):
+        with preserve_loading_random_state(Torch):
+            random.random()
+            raise RuntimeError('load failed')
+    assert random.getstate()==state and calls==[('enter',[]),('exit',[])]

@@ -87,10 +87,12 @@ class NextFireBackend:
             return np.empty((0,32),np.float32)
         if self._model is None:
             import torch
-            from transformers import Wav2Vec2ForCTC
             self._torch = torch
-            self._model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path, local_files_only=True,
-                                                       dtype=torch.float32).to(self.config.device).eval()
+            from lazulite._runtime import preserve_loading_random_state
+            with preserve_loading_random_state(torch):
+                from transformers import Wav2Vec2ForCTC
+                self._model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path, local_files_only=True,
+                                                           dtype=torch.float32).to(self.config.device).eval()
         def forward(y):
             t = self._torch
             with t.inference_mode():
