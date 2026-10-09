@@ -102,6 +102,14 @@ lazulite align-japanese --prepared prepared/manifest.json --targets units.json -
 ```
 
 结果 schema 为 `lazulite-japanese-result-v1`：原始路径、建议端点、原轴 fragments、拼接区间、问题和覆盖分别保存。
+`JapaneseConfig` 提供默认关闭的 `line_blank`、`rest_blank`、`rest_token` 三个独立布尔开关：
+行内 blank 每秒 1、行内休止 blank 每秒 4×rest、字符状态每秒 25×rest。
+首尾与跨行 blank 不受前两项影响，重复字符仍须经过 blank；首遍与行首辅助第二遍共用配置。
+rest 来自原轴人声的 30ms RMS／10ms 步长和 300ms 功率平滑，按本曲参考电平计算，
+再按 core 拼接映射积分到 20ms 声学帧，不在删段接缝平滑。
+execution 记录实际代价、输入和算法身份；组合变化使解码缓存隔离，声学缓存继续复用。
+这些实验选项改变全局路径，不代表质量必然改善，也不承担编辑器清空旧时间职责。
+
 CTC 默认回溯预算 512 MiB，滚动 float64 分数＋uint8 回溯；超限明确失败。
 声学块间与每 128 帧解码检查取消回调，抛出 `events.Cancelled`。
 固定 profile/假名计算的 MIT 来源及许可见 `THIRD_PARTY_LICENSES`。

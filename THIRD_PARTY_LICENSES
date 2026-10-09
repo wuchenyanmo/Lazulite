@@ -1,6 +1,6 @@
 MiliKara fixed revision ff2d2f54706ecb140bc5b275037eff64187ef6ef
 https://github.com/BilyHurington/MiliKara
-Kana/profile routines copied; CTC, hold timing and calibration adapted.
+Kana/profile routines copied; CTC, hold timing, calibration, RMS activity and frame soft costs adapted.
 
 MIT License
 

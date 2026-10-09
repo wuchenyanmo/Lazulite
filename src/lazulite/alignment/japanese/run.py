@@ -19,8 +19,13 @@ class JapaneseConfig:
     hint_mode: str = 'auto'
     max_decode_memory_bytes: int = DEFAULT_MEMORY
     completion: bool = True
+    line_blank: bool = False
+    rest_blank: bool = False
+    rest_token: bool = False
 
     def __post_init__(self):
+        if any(type(v) is not bool for v in (self.line_blank, self.rest_blank, self.rest_token)):
+            raise ValueError('soft cost switches must be boolean')
         if self.hint_mode not in {'off','auto'} or self.max_decode_memory_bytes <= 0:
             raise ValueError('invalid Japanese configuration')
 
@@ -138,7 +143,7 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
     execution={'adoption_policy':'proposed_endpoints_only; null_means_no_new_suggestion','route':'japanese','profile':'ja-hepburn/2','ctc':CTC_VERSION,'config':asdict(config),
                'pcm_id':prepared.pcm_id,'original_id':prepared.original_id,'segment_source':prepared.segment_source,
                'auto_conflict':prepared.segment_source=='manual' and prepared.analysis.is_vocal is False,
-               'request_id':cache_key(asdict(request)), 'input':asdict(request), 'score_definition':'sum of frame log probabilities plus one-time entry penalties'}
+               'request_id':cache_key(asdict(request)), 'input':asdict(request), 'score_definition':'frame log probabilities + one-time anchor entry penalties + per-frame soft costs'}
     reason=None
     if prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False:
         reason='no_vocal_evidence'
@@ -164,9 +169,18 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
         if lp.shape != (max(0,(concat.audio.samples.shape[1]-400)//320+1),32):
             raise ValueError('acoustic artifact frame/vocabulary shape mismatch')
         execution['acoustic_id']=acoustic_key
+        from .activity import frame_activity
+        rest, activity = frame_activity(prepared, concat, len(lp)) if config.rest_blank or config.rest_token else (None, None)
+        priors = {'line_blank': config.line_blank, 'rest_blank': config.rest_blank, 'rest_token': config.rest_token}
+        execution['soft_costs'] = {**priors, 'per_second': {'line_blank': int(config.line_blank),
+            'rest_blank': 4 * int(config.rest_blank), 'rest_token': 25 * int(config.rest_token)}, 'activity': activity}
+        token_lines = [line.line_id for line in request.lines for u in line.units for _ in range(*ranges[u.unit_id])]
+        decode_options = {**priors, 'token_lines': token_lines, 'frame_seconds': .02, 'rest': rest}
+
         try:
             decode_key=cache_key({'stage':'japanese-decode-v1','acoustic':acoustic_key,
-                                  'request':asdict(request),'profile':'ja-hepburn/2','ctc':CTC_VERSION}) if acoustic_key else None
+                                  'request':asdict(request),'profile':'ja-hepburn/2','ctc':CTC_VERSION, 'soft_costs': execution['soft_costs']}) if acoustic_key else None
+            execution['decode_id'] = decode_key
             cached=cache.get_json(decode_key) if cache is not None and decode_key else None
             if cached is not None:
                 try:
@@ -176,7 +190,7 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
                         raise ValueError('invalid cached CTC path')
                 except (KeyError,TypeError,ValueError):cached=None
             if cached is None:
-                spans,score=decode(lp,tokens, max_decode_memory_bytes=config.max_decode_memory_bytes,cancel=cancel,event_sink=event_sink)
+                spans,score=decode(lp,tokens, **decode_options, max_decode_memory_bytes=config.max_decode_memory_bytes,cancel=cancel,event_sink=event_sink)
                 if cache is not None and decode_key:
                     cache.set_json(decode_key,{'schema':'ctc-path-v1','spans':spans,'score':score})
             execution['first_pass_score']=score
@@ -196,7 +210,7 @@ def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, 
         execution['first_pass_id']=cache_key({'spans':spans,'request':execution['request_id']})
         if anchors:
             try:
-                second,score=decode(lp,tokens,anchors=anchors,max_decode_memory_bytes=config.max_decode_memory_bytes,
+                second,score=decode(lp,tokens,anchors=anchors,**decode_options,max_decode_memory_bytes=config.max_decode_memory_bytes,
                                     cancel=cancel,event_sink=event_sink)
                 units=_units(request,texts,ranges,problems,second,concat)
                 execution['second_pass_id']=cache_key({'spans':second,'anchors':[asdict(a) for a in anchors]})
