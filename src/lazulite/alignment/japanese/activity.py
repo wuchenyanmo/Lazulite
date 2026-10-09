@@ -28,7 +28,7 @@ def original_rest(audio):
     audible = level[level > -80]
     ref = float(np.percentile(audible, 90)) if len(audible) else None
     if ref is None or ref < -60:
-        return np.ones(count, np.float32), ref
+        return np.zeros(count, np.float32), ref
     return np.clip((ref - 8 - level) / 12, 0, 1).astype(np.float32), ref
 
 
@@ -58,5 +58,6 @@ def frame_activity(prepared, concat, frames):
         'smoothing_ms': 300, 'reference_db': reference,
         'frame_stride_samples': 320, 'frame_offset_samples': 0,
         'mapping': 'original envelope integral over concat pieces; no seam smoothing',
-        'silent_policy': 'rest=1',
+        'silent_policy': 'unavailable reference; no rest penalties',
+        'available': reference is not None and reference >= -60,
     }

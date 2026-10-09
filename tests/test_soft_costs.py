@@ -49,7 +49,8 @@ def test_original_activity_and_seam_mapping():
     # still sees its actual preceding silence, not the loud first piece.
     actual = map_rest(rest,concat,74)
     assert actual[50] > .8
-    assert len(original_rest(AudioBuffer(np.zeros((1,80),np.float32),16000,'short'))[0])==1
+    silent, reference = original_rest(AudioBuffer(np.zeros((1,80),np.float32),16000,'short'))
+    assert len(silent)==1 and silent[0]==0 and reference is None
 
 
 def test_combinations_cache_isolation_and_acoustic_reuse(tmp_path, monkeypatch):
