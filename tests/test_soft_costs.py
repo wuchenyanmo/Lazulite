@@ -22,7 +22,7 @@ def test_costs_against_exhaustive_state_paths(switches):
             lp = rng.normal(size=(6, 3))
             rest = np.linspace(0, 1, 6)
             lb, rb, rt = switches
-            spans, score = decode(lp, targets, blank=0, token_lines=lines, rest=rest,
+            spans, score = decode(lp, targets, blank=0, token_lines=lines, rest=rest, frame_seconds=.02,
                 line_blank=lb, rest_blank=rb, rest_token=rt)
             z = [0, targets[0], 0, targets[1], 0]
             scores = []

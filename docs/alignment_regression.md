@@ -8,6 +8,6 @@
 | L2 | s2 / 第二行 / confidence=0 | 20–23s，`acoustic_core` |
 | L3 | 待匹配歌词 | 时间为 null，`unresolved` |
 
-该样例固定当前行为，覆盖缺失置信度、有效零值和保留待匹配行。迁移前后的等价性验收还需旧提交、运行命令、对应输出及逐行差异记录。
+该样例固定当前行为，覆盖缺失置信度、有效零值和保留待匹配行。
 
-其他验证：[后端契约](backend_runtime_smoke.md)、[整曲基准](benchmark.md)。
+运行方式见[测试说明](../tests/README.md)，接口见[架构说明](architecture.md)。
