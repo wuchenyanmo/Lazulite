@@ -1,14 +1,14 @@
 # Lazulite
 
-面向本地音乐的 Python 歌词计算库，提供命令行和可独立调用的阶段 API。
+面向本地音乐的 Python 歌词对齐计算库，提供命令行和可独立调用的阶段 API。
 
 - 搜索网易云、QQ 音乐、酷狗与 LRCLIB 歌词候选。
-- 使用 Demucs 分离完整人声，分析声学活动与片段。
-- 使用 Whisper／Qwen 转写，返回正文、实际请求窗口、生成证据和概率摘要。
-- 读取文本、LRC 和 TTML，计算行级时间候选。
-- 独立日语路线：人声 core 拼接、Wav2Vec2 CTC、行首提示校准和端点整理。
+- 使用 Demucs 分离完整人声，分析声学活动与人声片段。
+- 行级对齐路线：提供通用的跨语言行级对齐能力，使用 Whisper 转写各人声片段，在歌词无参考时间的情况下使用动态规划将片段与歌词对齐，在歌词有参考时间的情况下估计歌词时间的总体/分段偏移
+- 日语词级对齐路线：不依赖行级结果，使用人声片段拼接、Wav2Vec2 CTC 词级对齐、可选的行首提示校准和端点整理。
+- 支持读取文本、LRC 和 TTML。
 
-Lazulite 消费本次输入并返回结果。调用方负责阶段结果的保存、选择与复用；模型实例通过 `close()` 释放。
+注意转写模型的输出只用于匹配，不会进入结果正文，当前可用的开源 ASR 模型都无法达到从头转写歌词正文的可用线，故 Lazulite 必须依赖外部输入的歌词文本。
 
 ## 安装
 
@@ -19,7 +19,7 @@ python -m pip install .
 python -m pip install -c constraints.txt '.[whisper,japanese,vocal]'
 ```
 
-模型路径指向本地目录。依赖约束提供安装参考，CUDA Torch 构建按部署环境选择。
+模型路径指向本地目录。依赖约束提供各个模块的独立依赖的安装版本参考，CUDA Torch 构建或安装应当按实际部署环境选择。
 
 ## 命令行
 
@@ -75,9 +75,21 @@ raw = finalize_japanese(decoded, completion=False)
 
 `NextFireBackend` 适配本地 Wav2Vec2 CTC：从配置读取采样率、卷积步长／感受野、输出列数、词表和 blank。支持同结构修改权重与相容配置；不同架构由调用方实现声学后端。`inspect_model(path)` 仅读小型配置和检查权重文件是否存在。
 
+日语 Wav2Vec2 CTC 模型建议使用 [NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn](https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn)，该模型针对日语歌唱后训练，需注意其使用 CC-BY-NC-SA-4.0 协议，禁止商用
+
 日语 profile 将读音转换成 Hepburn 字母，再通过所选词表编码；不能表达的读音保留未解决状态。`decode_japanese(..., encoder=...)` 可显式提供不同目标编码。`FrameMap` 以样本为单位声明步长、感受野和偏移，端点使用半开帧区间，公开时间为秒。
 
-`JapaneseConfig` 默认启用外部行首提示校准和局部端点补全；三个软代价默认关闭：`line_blank` 每秒 1，`rest_blank` 每秒 4×rest，`rest_token` 每秒 25×rest。休止活动从原轴 30 ms RMS／10 ms 步长、300 ms 功率平滑计算，再积分到实际声学帧，不跨删段接缝平滑。这些选项改变路径，不代表质量必然改善。
+假名转换和以下三项软代价直接使用了 [MiliKara](https://github.com/BilyHurington/MiliKara) 的代码，并按 Lazulite 的阶段接口与时间轴映射作了适配。原作者版权和 MIT 许可声明保留于 [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES)。
+
+`JapaneseConfig` 默认启用外部行首提示校准和局部端点补全；三个软代价默认关闭，可独立开启，作用重叠时相加。设一帧时长为 `Δt` 秒，该帧休止强度为 `rest`，从 CTC 路径分数中扣除：
+
+| 开关 | 作用位置 | 每帧扣分 |
+| --- | --- | --- |
+| `line_blank` | 同一歌词行相邻目标 token 之间的 CTC blank 状态 | `Δt` |
+| `rest_blank` | 同一歌词行相邻目标 token 之间的 CTC blank 状态 | `4 × rest × Δt` |
+| `rest_token` | 所有目标 token 状态 | `25 × rest × Δt` |
+
+`rest ∈ [0, 1]` 是相对人声能量推导的休止强度，越大表示越接近休止。它从原轴人声的 30 ms RMS／10 ms 步长、300 ms 功率平滑计算，再积分到实际声学帧，不跨删段接缝平滑；参考电平不可用时将 `rest` 置零。有限样本的消融结果显示这些代价可能并不会显著提高对齐精度，部分条件下甚至会降低效果，使用前需自行评估。
 
 结果保留每个目标 ID、原始／建议端点、跨删段 fragments 和问题。`null` 表示没有新建议；`complete` 表示覆盖完整，不保证准确。Whisper 的概率也不代表时间正确率。
 
