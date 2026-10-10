@@ -15,7 +15,7 @@ from lazulite.models.transcription import BackendInfo
 @dataclass(frozen=True, slots=True)
 class QwenForcedAlignmentConfig:
     model_path: Path
-    model_id: str
+    model_id: str | None = None
     device_map: str = "cuda:0"
     precision: str = "bfloat16"
     attention_implementation: str = "sdpa"

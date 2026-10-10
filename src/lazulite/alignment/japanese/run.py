@@ -1,6 +1,5 @@
-"""Independent Japanese fixed baseline, retaining every requested object ID."""
-from dataclasses import asdict, dataclass, replace
-import numpy as np
+"""Independent Japanese stages, retaining every requested object ID."""
+from dataclasses import asdict, dataclass
 from lazulite.audio.concat import concatenate_cores
 from lazulite.events import checkpoint, ProgressEvent
 from lazulite.models.audio import PreparedVocals
@@ -211,7 +210,7 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
             except NoFeasiblePath:
                 calibration['reason']='second_pass_infeasible'
     checkpoint(cancel)
-    return DecodeResult(request,tuple(tokens),dict(acoustic.vocabulary),acoustic.blank_id,ranges,texts,problems,first,tuple(spans) if spans is not None else None,
+    return DecodeResult(request,tuple(tokens),dict(acoustic.vocabulary),acoustic.blank_id,acoustic.special_tokens,lp.shape[1],ranges,texts,problems,first,tuple(spans) if spans is not None else None,
         len(lp),frames,concat,acoustic.original_duration,execution,calibration,reason)
 
 

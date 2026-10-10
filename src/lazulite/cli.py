@@ -18,11 +18,10 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
 
 
-def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = False) -> None:
-    parser.add_argument("--backend", choices=("qwen",) if forced else ("whisper", "qwen"), required=True)
-    parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--model-id", default="Qwen/Qwen3-ForcedAligner-0.6B" if forced else None)
-    parser.add_argument("--revision", required=True, help="模型权重对应的固定 revision 或 SHA256")
+def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = False, required: bool = True) -> None:
+    parser.add_argument("--backend", choices=("qwen",) if forced else ("whisper", "qwen"), required=required)
+    parser.add_argument("--model-path", type=Path, required=required)
+    parser.add_argument("--model-id", default=None)
     parser.add_argument("--device-map", default="cuda:0", help="Qwen 使用的 Transformers device_map")
     if forced:
         return
@@ -39,27 +38,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    prepare = commands.add_parser("prepare-vocals", help="从原曲分离，或显式导入完整人声")
-    prepare.add_argument("audio", type=Path, nargs="?", help="原曲音频（与 --vocals 互斥）")
-    prepare.add_argument("--vocals", type=Path, help="已有完整人声文件")
-    prepare.add_argument("--original-id", help="导入人声对应的原曲内容身份")
-    prepare.add_argument("--original-duration", type=float, help="导入人声对应的原曲秒数")
-    prepare.add_argument("--separator-model", default="htdemucs")
-    prepare.add_argument("--separator-device", default="cuda")
-    prepare.add_argument("--separator-revision")
-    prepare.add_argument("--output-dir", type=Path, required=True)
-
     japanese = commands.add_parser("align-japanese", help="独立日语全局词级对齐")
     source = japanese.add_mutually_exclusive_group(required=True)
-    source.add_argument("--prepared", type=Path, help="已准备人声 manifest.json")
+    source.add_argument("--vocals", type=Path, help="完整人声音频")
+    source.add_argument("--acoustic-input", type=Path, help="显式声学 NPZ")
+    source.add_argument("--decode-input", type=Path, help="显式解码 JSON")
     source.add_argument("--audio", type=Path, help="原曲音频（自动 Demucs 准备）")
     target = japanese.add_mutually_exclusive_group(required=True)
     target.add_argument("--targets", type=Path, help="lazulite-japanese-request-v1 JSON")
     target.add_argument("--ttml", type=Path, help="TTML 正文与 Ruby 最小投影")
     japanese.add_argument("--without-completion", action="store_true", help="只输出固定 profile 原始路线")
-    japanese.add_argument("--model-path", type=Path, required=True, help="固定 NextFire 本地权重目录")
+    japanese.add_argument("--model-path", type=Path, help="本地 Wav2Vec2 CTC 模型目录")
     japanese.add_argument("--device", default="cpu")
-    japanese.add_argument("--cache", type=Path)
+    japanese.add_argument("--acoustic-output", type=Path)
+    japanese.add_argument("--decode-output", type=Path)
     japanese.add_argument("--hint-mode", choices=("off", "auto"), default="auto")
     japanese.add_argument("--max-decode-memory-bytes", type=int, default=512*1024*1024)
     japanese.add_argument("--output", type=Path, required=True)
@@ -79,12 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--output", type=Path, required=True)
 
     align = commands.add_parser("align", help="将 TTML 歌词行与音频对齐")
-    align.add_argument("audio", type=Path, nargs="?", help="原曲音频，与 --prepared 互斥")
-    align.add_argument("--prepared", type=Path, help="复用已准备的人声 manifest")
-    align.add_argument("--cache", type=Path)
+    source = align.add_mutually_exclusive_group(required=True)
+    source.add_argument("--audio", type=Path, help="原曲音频")
+    source.add_argument("--vocals", type=Path, help="完整人声音频")
+    align.add_argument("--transcriptions-input", type=Path)
+    align.add_argument("--transcriptions-output", type=Path)
     align.add_argument("--evidence-policy", choices=("generic", "whisper-lexical-v1"), default="generic")
     align.add_argument("lyrics", type=Path)
-    _add_backend_options(align)
+    _add_backend_options(align, required=False)
     align.add_argument("--language")
     align.add_argument("--mode", choices=("dp", "offset", "hybrid", "auto"), default="auto")
     align.add_argument("--separator-model")
@@ -105,14 +99,15 @@ def build_parser() -> argparse.ArgumentParser:
 def _build_transcriber(arguments: argparse.Namespace):
     from .transcription.backends import QwenBackend, QwenConfig, WhisperBackend, WhisperConfig
 
+    if arguments.backend is None or arguments.model_path is None:
+        raise ValueError("转写计算需要 --backend 和 --model-path")
     distributions = arguments.full_distributions
     if distributions is not None:
         distributions.mkdir(parents=True, exist_ok=True)
     if arguments.backend == "whisper":
         return WhisperBackend(WhisperConfig(
             model_path=arguments.model_path,
-            model_id=arguments.model_id or "openai/whisper-large-v3",
-            revision=arguments.revision,
+            model_id=arguments.model_id,
             device=arguments.device,
             precision=arguments.precision or ("float32" if arguments.device=="cpu" else "float16"),
             top_k=arguments.top_k,
@@ -121,8 +116,7 @@ def _build_transcriber(arguments: argparse.Namespace):
         ))
     return QwenBackend(QwenConfig(
         model_path=arguments.model_path,
-        model_id=arguments.model_id or "Qwen/Qwen3-ASR",
-        revision=arguments.revision,
+        model_id=arguments.model_id,
         device_map=arguments.device_map,
         top_k=arguments.top_k,
         distribution_output_dir=distributions,
@@ -131,58 +125,44 @@ def _build_transcriber(arguments: argparse.Namespace):
 
 def _run_japanese(arguments: argparse.Namespace) -> int:
     from .models.japanese import JapaneseAlignmentRequest
-    from .audio.preparation import read_prepared, prepare_vocals
-    from .audio.io import decode_audio
-    from .alignment.japanese.backend import NextFireBackend, NextFireConfig
-    from .alignment.japanese.run import align_japanese, JapaneseConfig
-    from .cache import FileCache
-    # Structural errors are rejected before constructing/loading any model.
+    from .alignment.japanese.run import compute_acoustics, decode_japanese, finalize_japanese, JapaneseConfig
+    from .exchange import read_acoustic, write_acoustic, read_decode, write_decode
     if arguments.targets is not None:
-        request = JapaneseAlignmentRequest.from_dict(json.loads(arguments.targets.read_text("utf-8")))
+        request=JapaneseAlignmentRequest.from_dict(json.loads(arguments.targets.read_text("utf-8")))
     else:
         from .lyrics.ttml import read_ttml_for_japanese
-        request = read_ttml_for_japanese(arguments.ttml)
-    if arguments.prepared is not None:
-        prepared = read_prepared(arguments.prepared)
+        request=read_ttml_for_japanese(arguments.ttml)
+    config=JapaneseConfig(hint_mode=arguments.hint_mode,max_decode_memory_bytes=arguments.max_decode_memory_bytes,
+                          completion=not arguments.without_completion)
+    if arguments.decode_input is not None:
+        if arguments.model_path is not None or arguments.acoustic_output is not None:
+            raise ValueError('解码输入不接受声学模型或声学输出')
+        decoded=read_decode(arguments.decode_input)
+        if decoded.request!=request: raise ValueError('解码目标与本次歌词不一致')
     else:
-        from .audio.separation import DemucsSeparator, DemucsConfig
-        separator = DemucsSeparator(DemucsConfig(device=arguments.device))
-        try:
-            prepared = prepare_vocals(decode_audio(arguments.audio, sample_rate=44100, channels=2), separator=separator)
-        finally:
-            separator.close()
-    backend = NextFireBackend(NextFireConfig(arguments.model_path, arguments.device))
-    try:
-        result = align_japanese(prepared, request, backend=backend,
-            config=JapaneseConfig(hint_mode=arguments.hint_mode, max_decode_memory_bytes=arguments.max_decode_memory_bytes, completion=not arguments.without_completion),
-            cache=FileCache(arguments.cache) if arguments.cache else None)
-        _write_json(arguments.output, asdict(result))
-    finally:
-        backend.close()
-    return 0
-
-
-def _run_prepare(arguments: argparse.Namespace) -> int:
-    from .audio.io import decode_audio, decode_native_audio
-    from .audio.preparation import prepare_vocals, prepare_existing_vocals, write_prepared
-    if (arguments.audio is None) == (arguments.vocals is None):
-        raise ValueError("必须且只能提供原曲 audio 或 --vocals 完整人声")
-    if arguments.vocals is not None:
-        if arguments.original_id is None or arguments.original_duration is None:
-            raise ValueError("导入人声必须提供 --original-id 和 --original-duration")
-        prepared = prepare_existing_vocals(decode_native_audio(arguments.vocals),
-            original_id=arguments.original_id, original_duration=arguments.original_duration)
-    else:
-        if arguments.original_id is not None or arguments.original_duration is not None:
-            raise ValueError("原曲自动准备不接受人声导入身份参数")
-        from .audio.separation import DemucsConfig, DemucsSeparator
-        separator = DemucsSeparator(DemucsConfig(arguments.separator_model, arguments.separator_device,
-                                                  arguments.separator_revision))
-        try:
-            prepared = prepare_vocals(decode_audio(arguments.audio, sample_rate=44100, channels=2), separator=separator)
-        finally:
-            separator.close()
-    write_prepared(prepared, arguments.output_dir)
+        if arguments.acoustic_input is not None:
+            if arguments.model_path is not None: raise ValueError('声学输入不接受模型路径')
+            acoustic=read_acoustic(arguments.acoustic_input)
+        else:
+            if arguments.model_path is None: raise ValueError('音频输入需要 --model-path')
+            from .audio.preparation import prepare_vocals,prepare_existing_vocals
+            from .audio.io import decode_native_audio,decode_audio
+            if arguments.vocals is not None:
+                prepared=prepare_existing_vocals(decode_native_audio(arguments.vocals))
+            else:
+                from .audio.separation import DemucsSeparator,DemucsConfig
+                separator=DemucsSeparator(DemucsConfig(device=arguments.device))
+                try: prepared=prepare_vocals(decode_audio(arguments.audio,sample_rate=44100,channels=2),separator=separator)
+                finally: separator.close()
+            from .alignment.japanese.backend import NextFireBackend,NextFireConfig
+            backend=NextFireBackend(NextFireConfig(arguments.model_path,arguments.device))
+            try: acoustic=compute_acoustics(prepared,backend=backend)
+            finally: backend.close()
+        if arguments.acoustic_output is not None: write_acoustic(arguments.acoustic_output,acoustic)
+        decoded=decode_japanese(acoustic,request,config=config)
+    if arguments.decode_output is not None: write_decode(arguments.decode_output,decoded)
+    result=finalize_japanese(decoded,completion=config.completion)
+    _write_json(arguments.output,asdict(result))
     return 0
 
 
@@ -217,27 +197,29 @@ def _run_transcribe(arguments: argparse.Namespace) -> int:
         )
         _write_json(arguments.output, asdict(result))
     finally:
-        backend.close()
+        if backend is not None: backend.close()
     return 0
 
 
 def _run_align(arguments: argparse.Namespace) -> int:
     from .audio.io import decode_audio
-    from .audio.preparation import read_prepared
+    from .audio.preparation import prepare_existing_vocals
+    from .audio.io import decode_native_audio
     from .lyrics.ttml import read_ttml_for_alignment
     from .pipeline import AlignmentPipeline, PipelineConfig
     from .alignment.line import LineAlignmentConfig
     from .alignment.offset import OffsetAlignmentConfig
     from .transcription.run import TranscriptionConfig
     from .transcription.evidence import EvidenceConfig
-    from .cache import FileCache
-    if (arguments.audio is None)==(arguments.prepared is None):
-        raise ValueError("必须且只能提供原曲 audio 或 --prepared manifest")
-    if arguments.prepared is not None and (arguments.separator_model is not None or arguments.separator_device is not None):
-        raise ValueError("prepared 输入不接受分离参数")
+    from .exchange import read_transcriptions,write_transcriptions
+    if arguments.vocals is not None and (arguments.separator_model is not None or arguments.separator_device is not None):
+        raise ValueError("完整人声输入不接受分离参数")
     document=read_ttml_for_alignment(arguments.lyrics)
-    prepared=read_prepared(arguments.prepared) if arguments.prepared is not None else None
-    backend=_build_transcriber(arguments)
+    prepared=prepare_existing_vocals(decode_native_audio(arguments.vocals)) if arguments.vocals is not None else None
+    supplied=read_transcriptions(arguments.transcriptions_input) if getattr(arguments,'transcriptions_input',None) else None
+    if supplied is not None and getattr(arguments,'backend',None) is None and getattr(arguments,'model_path',None) is not None:
+        raise ValueError('单独模型路径未指定转写后端')
+    backend=_build_transcriber(arguments) if supplied is None or getattr(arguments,'backend',None) is not None else None
     separator=None
     try:
         if prepared is None:
@@ -247,14 +229,15 @@ def _run_align(arguments: argparse.Namespace) -> int:
         config=PipelineConfig(mode=arguments.mode,language=arguments.language,
             line=LineAlignmentConfig(evidence=evidence),offset=OffsetAlignmentConfig(evidence=evidence),
             transcription=TranscriptionConfig(evidence=evidence))
-        pipeline=AlignmentPipeline(transcriber=backend,separator=separator,cache=FileCache(arguments.cache) if arguments.cache else None)
-        result=pipeline.run_prepared(prepared,document,config=config) if prepared is not None else pipeline.run(
-            decode_audio(arguments.audio,sample_rate=44100,channels=2),document,config=config)
+        pipeline=AlignmentPipeline(transcriber=backend,separator=separator)
+        result=pipeline.run_prepared(prepared,document,config=config,transcriptions=supplied) if prepared is not None else pipeline.run(
+            decode_audio(arguments.audio,sample_rate=44100,channels=2),document,config=config,transcriptions=supplied)
+        if getattr(arguments,'transcriptions_output',None): write_transcriptions(arguments.transcriptions_output,result.transcriptions)
         _write_json(arguments.output,{**asdict(result.alignment),'status':result.alignment.status,
             'coverage':result.alignment.coverage,'issue_counts':result.alignment.issue_counts})
     finally:
         if separator is not None:separator.close()
-        backend.close()
+        if backend is not None: backend.close()
     return 0
 
 
@@ -269,7 +252,6 @@ def _run_forced_alignment(arguments: argparse.Namespace) -> int:
     aligner = QwenForcedAligner(QwenForcedAlignmentConfig(
         model_path=arguments.model_path,
         model_id=arguments.model_id,
-        revision=arguments.revision,
         device_map=arguments.device_map,
     ))
     try:
@@ -283,7 +265,6 @@ def _run_forced_alignment(arguments: argparse.Namespace) -> int:
 
 _HANDLERS: dict[tuple[str, str | None], Callable[[argparse.Namespace], int]] = {
     ("align-japanese", None): _run_japanese,
-    ("prepare-vocals", None): _run_prepare,
     ("lyrics", "search"): _run_lyrics_search,
     ("transcribe", None): _run_transcribe,
     ("align", None): _run_align,
@@ -295,11 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     """运行命令；库异常保留原因，CLI 仅将其转为简洁的非零退出。"""
     arguments = build_parser().parse_args(argv)
     try:
-        output=getattr(arguments,'output',None)
-        if output is not None:
-            sources=[getattr(arguments,name,None) for name in ('audio','vocals','prepared','targets','ttml','lyrics','text')]
-            if any(isinstance(source,Path) and source.resolve()==output.resolve() for source in sources):
-                raise ValueError("结果文件不能覆盖输入音频、manifest 或歌词")
+        inputs=[getattr(arguments,name,None) for name in ('audio','vocals','targets','ttml','lyrics','text','acoustic_input','decode_input','transcriptions_input')]
+        outputs=[getattr(arguments,name,None) for name in ('output','acoustic_output','decode_output','transcriptions_output')]
+        paths=[p.resolve() for p in outputs if p is not None]
+        model=getattr(arguments,'model_path',None)
+        if len(paths)!=len(set(paths)) or any(p.resolve() in paths for p in inputs if p is not None) or (model is not None and any(p==model.resolve() or model.resolve() in p.parents for p in paths)):
+            raise ValueError("输出不能覆盖输入、模型或其他输出")
         return _HANDLERS[(arguments.command, getattr(arguments, "lyrics_command", None))](arguments)
     except (KeyboardInterrupt, SystemExit):
         raise

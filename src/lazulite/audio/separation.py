@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from importlib.metadata import PackageNotFoundError, version
+from dataclasses import dataclass
 
 from lazulite.models.audio import AudioBuffer
 

@@ -21,7 +21,7 @@ from lazulite.transcription.token_scores import export_full_logprobs, extract_to
 @dataclass(frozen=True, slots=True)
 class QwenConfig:
     model_path: Path
-    model_id: str
+    model_id: str | None = None
     device_map: str = "cuda:0"
     precision: str = "bfloat16"
     attention_implementation: str = "sdpa"
@@ -34,6 +34,10 @@ class QwenBackend:
     """Qwen3-ASR 的无时间转写后端；概率不被误写成 token 时间。"""
 
     capabilities = TranscriberCapabilities("none", context=False, max_audio_seconds=None)
+
+    @property
+    def config(self):
+        return self._config
 
     def __init__(self, config: QwenConfig) -> None:
         try:

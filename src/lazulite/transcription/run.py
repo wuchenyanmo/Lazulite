@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from typing import Literal
 from .evidence import transcription_quality, EvidenceConfig, repetition, eligible_for_transcription
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
-from lazulite.models.transcription import TranscriptionResult, RequestWindow, transcription_segment_from_dict
+from lazulite.models.transcription import TranscriptionResult, RequestWindow
 
-from .base import Transcriber, TranscriptionInput, TranscriptionRequest
+from .base import Transcriber, TranscriptionInput, TranscriptionRequest, TranscriberCapabilities
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +73,7 @@ def _bind(item, result, request, context=None):
     if result.source_segment_id != item.segment.id:
         raise ValueError('backend returned unrelated request evidence')
     return replace(result,request_window=item.segment,backend_metadata={**result.backend_metadata,
-        'request_context':context,'request_timing':request.include_timing})
+        'request_context':context,'request_timing':request.include_timing,'request_language':request.language})
 
 
 def transcribe_segments(
@@ -147,7 +147,7 @@ class TranscriptionStage:
     segments: tuple[VocalSegment, ...]
     request: TranscriptionRequest
     config: TranscriptionConfig
-    capabilities: object
+    capabilities: TranscriberCapabilities
     result: TranscriptionResult
 
     def validate(self, audio):
@@ -155,14 +155,20 @@ class TranscriptionStage:
             maximum_seconds=self.capabilities.max_audio_seconds)
         if len(expected) != len(self.result.segments):
             raise ValueError("transcription stage missing request windows")
+        history=[]
         for item, result in zip(expected, self.result.segments):
             result.__post_init__()
             if result.request_window != item.segment or result.source_segment_id != item.segment.id:
                 raise ValueError("transcription window/parent mismatch")
             if result.backend_metadata.get('request_timing') is not self.request.include_timing:
                 raise ValueError("transcription timing condition mismatch")
-            if 'request_context' not in result.backend_metadata:
-                raise ValueError("transcription actual context is required")
+            contextual = self.capabilities.context and not self.request.include_timing
+            context = _context(history,item.segment,self.config,self.request.context) if contextual else None
+            if ('request_context' not in result.backend_metadata or result.backend_metadata['request_context']!=context or
+                'request_language' not in result.backend_metadata or result.backend_metadata['request_language']!=self.request.language):
+                raise ValueError("transcription actual context/language condition mismatch")
+            if contextual and transcription_quality(result,item.segment,self.config.evidence).risk < .42:
+                history.append(repetition(result.text)[1])
 
 
 def run_transcription_stage(audio, segments, *, transcriber, request=TranscriptionRequest(),

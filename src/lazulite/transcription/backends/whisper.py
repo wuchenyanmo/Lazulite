@@ -17,7 +17,7 @@ from lazulite.transcription.token_scores import export_full_logprobs, extract_to
 @dataclass(frozen=True, slots=True)
 class WhisperConfig:
     model_path: Path
-    model_id: str
+    model_id: str | None = None
     device: str = "cuda"
     precision: str = "float16"
     attention_implementation: str = "eager"
@@ -47,6 +47,10 @@ _BYTE_DECODER = _byte_decoder()
 
 class WhisperBackend:
     capabilities = TranscriberCapabilities("subword", context=True, max_audio_seconds=30.0)
+
+    @property
+    def config(self):
+        return self._config
 
     def __init__(self, config: WhisperConfig) -> None:
         try:

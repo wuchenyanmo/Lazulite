@@ -40,9 +40,12 @@ def write_decode(path, result):
 def read_decode(path):
     v=json.loads(Path(path).read_text('utf-8'))
     if v.pop('schema')!='lazulite-decode-v1': raise ValueError('unsupported decode format')
+    if v['execution']['input'] != v['request']:
+        raise ValueError('decoded execution and target request differ')
     v['request']=JapaneseAlignmentRequest.from_dict({'schema':'lazulite-japanese-request-v1',**v['request']})
     v['execution']['input']=asdict(v['request'])
     v['frames']=FrameMap(**v['frames']);v['mapping']=_mapping(v['mapping'])
+    v['special_tokens']=tuple(v['special_tokens'])
     v['tokens']=tuple(v['tokens']);v['ranges']={k:tuple(x) for k,x in v['ranges'].items()}
     for key in ('first_pass','spans'):
         if v[key] is not None: v[key]=tuple(tuple(x) for x in v[key])

@@ -71,14 +71,13 @@ def main() -> int:
     parser.add_argument("--fixture-dir", type=Path, required=True)
     parser.add_argument("--backend", choices=("qwen", "whisper"), required=True)
     parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--revision", required=True)
     parser.add_argument("--mode", choices=("dp", "offset", "hybrid", "auto"), default="dp")
     parser.add_argument("--source-shift", type=float, default=4.0, help="非 DP 模式注入的已知源时间偏移秒数")
     parser.add_argument("--without-separation", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     model_started = perf_counter()
-    backend = QwenBackend(QwenConfig(arguments.model_path, "Qwen/Qwen3-ASR", arguments.revision)) if arguments.backend == "qwen" else WhisperBackend(WhisperConfig(arguments.model_path, "openai/whisper-large-v3", arguments.revision))
+    backend = QwenBackend(QwenConfig(arguments.model_path, "Qwen/Qwen3-ASR")) if arguments.backend == "qwen" else WhisperBackend(WhisperConfig(arguments.model_path, "openai/whisper-large-v3"))
     model_load_seconds = perf_counter() - model_started
     separator = None if arguments.without_separation else DemucsSeparator(DemucsConfig())
     records: list[dict[str, object]] = []
@@ -115,10 +114,9 @@ def main() -> int:
                 "backend": asdict(result.transcription.backend) if result.transcription else asdict(backend.info),
                 "effective_config": {
                     "pipeline": asdict(PipelineConfig(mode=arguments.mode, language=reference.language)),
-                    "transcriber": backend.cache_identity,
+                    "transcriber": asdict(backend.config),
                     "separator": {"kind": "none"} if separator is None else {
                         "config": asdict(separator.config),
-                        "cache_identity": separator.cache_identity,
                     },
                 },
                 "metrics": _metrics(reference, result.alignment),

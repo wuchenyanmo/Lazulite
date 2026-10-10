@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol
-import warnings
+from typing import Literal
 
-from lazulite import __version__
 from lazulite.alignment.line import LineAlignmentConfig, align_lines
 from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.audio.activity import VocalConfig, main_vocal_audio
@@ -16,19 +13,11 @@ from lazulite.audio.preparation import prepare_vocals, prepare_existing_vocals
 from lazulite.events import EventSink, ProgressEvent
 from lazulite.models.alignment import (
     AlignedLyricLine,
-    AlignmentAnchor,
     LineAlignmentResult,
 )
-from lazulite.models.audio import AudioBuffer, PreparedVocals, VocalAnalysis, VocalSegment
+from lazulite.models.audio import AudioBuffer, PreparedVocals, VocalAnalysis
 from lazulite.models.lyrics import LyricDocument
-from lazulite.models.transcription import (
-    BackendInfo,
-    TimedText,
-    RequestWindow,
-    ProbabilitySummary,
-    TranscriptionResult,
-    TranscriptionSegment,
-)
+from lazulite.models.transcription import TranscriptionResult
 from lazulite.transcription.base import Transcriber, TranscriptionRequest
 from lazulite.transcription.run import TranscriptionConfig, TranscriptionStage, run_transcription_stage, build_transcription_inputs
 from lazulite.transcription.evidence import eligible_for_transcription
@@ -117,6 +106,8 @@ class AlignmentPipeline:
         }
         self._emit("analysis", "started")
         if (prepared.segment_source == "automatic" and analysis.is_vocal is False) or not analysis.segments:
+            if transcriptions:
+                raise ValueError("transcription stages conflict with empty/no-vocal selection")
             # 无人声只是缺少自动化证据，不能丢失调用方传入的歌词行。
             unresolved = LineAlignmentResult(
                 tuple(

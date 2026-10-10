@@ -28,7 +28,7 @@ def test_prepare_separates_each_run_and_uses_original_reference(monkeypatch):
     def analyze(value,*,config,reference):
         assert reference is audio
         return analysis
-    monkeypatch.setattr('lazulite.audio.preparation.analyze_vocals',analyze)
+    monkeypatch.setattr(__import__('lazulite.audio.preparation',fromlist=['analyze_vocals']),'analyze_vocals',analyze)
     for _ in range(2):
         result=prepare_vocals(audio,separator=Separator())
         assert result.analysis_description['reference']=='original_mix_mono_peak'

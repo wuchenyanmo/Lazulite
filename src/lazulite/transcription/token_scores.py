@@ -116,11 +116,11 @@ def export_full_logprobs(
     *,
     lexical_steps: Sequence[int],
     source_segment_id: str,
-    model_id: str,
+    model_id: str | None = None,
 ) -> Path:
     """显式保存可恢复的完整分布；常规 JSON 只保存该文件引用和摘要。"""
-    if not source_segment_id or not model_id:
-        raise ValueError("全分布导出必须记录分片、模型和 tokenizer 身份")
+    if not source_segment_id:
+        raise ValueError("全分布导出必须关联请求分片")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -130,6 +130,6 @@ def export_full_logprobs(
         lexical_steps=np.asarray(lexical_steps, dtype=np.int64),
         distribution_kind=np.asarray(summary.distribution_kind),
         source_segment_id=np.asarray(source_segment_id),
-        model_id=np.asarray(model_id),
+        **({"model_id":np.asarray(model_id)} if model_id is not None else {}),
     )
     return target

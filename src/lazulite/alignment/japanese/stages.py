@@ -1,5 +1,5 @@
 """Public numerical and coordinate contracts for reusable Japanese stages."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from math import isfinite
 import numpy as np
 from lazulite.audio.concat import ConcatMap
@@ -22,7 +22,7 @@ class FrameMap:
         return self.stride_samples / self.sample_rate
 
     def time(self, frame):
-        return (self.offset_samples + frame*self.stride_samples)/self.sample_rate
+        return self.offset_samples/self.sample_rate + frame*self.seconds
 
     def index(self, seconds):
         return (seconds*self.sample_rate-self.offset_samples)/self.stride_samples
@@ -54,7 +54,7 @@ class AcousticResult:
         ids = list(self.vocabulary.values())
         if not ids or any(type(v) is not int or not 0 <= v < lp.shape[1] for v in ids) or len(set(ids)) != len(ids) or any(not isinstance(k,str) or not k for k in self.vocabulary):
             raise ValueError('invalid token columns')
-        if len(lp) and not np.allclose(np.logaddexp.reduce(lp.astype(np.float64),axis=1),0,atol=2e-4):
+        if len(lp) and not np.allclose(np.logaddexp.reduce(lp,axis=1,dtype=np.float64),0,atol=2e-4):
             raise ValueError('rows must be normalized log probabilities')
         if self.frames.sample_rate != self.mapping.sample_rate or (len(lp) and self.frames.time(len(lp)) > self.mapping.duration+1e-8):
             raise ValueError('frame mapping outside concatenated audio')
@@ -70,6 +70,8 @@ class DecodeResult:
     tokens: tuple[int, ...]
     vocabulary: dict[str, int]
     blank_id: int
+    special_tokens: tuple[str, ...]
+    vocabulary_size: int
     ranges: dict[str, tuple[int, int]]
     texts: dict[str, str]
     problems: dict[str, str]
@@ -93,7 +95,9 @@ class DecodeResult:
             not isfinite(self.original_duration) or self.original_duration<0 or
             any(p.source_end/self.mapping.sample_rate>self.original_duration+1e-8 for p in self.mapping.pieces)):
             raise ValueError('invalid decoded coordinates')
-        if any(t not in self.vocabulary.values() or t==self.blank_id for t in self.tokens):
+        if (type(self.blank_id) is not int or not 0<=self.blank_id<self.vocabulary_size or
+            any(type(v) is not int or not 0<=v<self.vocabulary_size for v in self.vocabulary.values()) or
+            any(t not in self.vocabulary.values() or t==self.blank_id for t in self.tokens)):
             raise ValueError('invalid decoded target IDs')
         for key in ('first_pass_score','second_pass_score'):
             if key in self.execution and not isfinite(self.execution[key]): raise ValueError('invalid decode score')
@@ -107,7 +111,16 @@ class DecodeResult:
             end=b
         if end!=len(self.tokens) or any(type(t) is not int or t<0 for t in self.tokens):
             raise ValueError('invalid decoded targets')
+        if self.execution.get('input') != asdict(self.request):
+            raise ValueError('decoded execution and target request differ')
+        if self.execution.get('profile') == 'ja-hepburn/2':
+            from .run import _profile
+            texts,tokens,ranges,problems = _profile(self.request,self.vocabulary,self.blank_id,self.special_tokens)
+            if (texts,tuple(tokens),ranges,problems)!=(self.texts,self.tokens,self.ranges,self.problems):
+                raise ValueError('decoded targets do not match readings')
+        if (self.spans is None)!=(self.first_pass is None) or (self.spans is None and not self.reason):
+            raise ValueError('decoded path status mismatch')
         for spans in (self.first_pass,self.spans):
             if spans is not None:
-                if len(spans)!=len(self.tokens) or any(not 0<=a<b<=self.frame_count for a,b in spans) or any(x[1]>y[0] for x,y in zip(spans,spans[1:])):
+                if len(spans)!=len(self.tokens) or any(type(a) is not int or type(b) is not int or not 0<=a<b<=self.frame_count for a,b in spans) or any(x[1]>y[0] for x,y in zip(spans,spans[1:])):
                     raise ValueError('invalid decoded spans')

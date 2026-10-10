@@ -24,7 +24,7 @@ class SoftAnchor:
 
 
 def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_MEMORY,
-           cancel=None, event_sink=None, token_lines=None, frame_seconds=.02,
+           cancel=None, event_sink=None, token_lines=None, frame_seconds=None,
            line_blank=False, rest_blank=False, rest_token=False, rest=None):
     lp = np.asarray(logp)
     targets = np.asarray(targets, dtype=np.int64)
@@ -46,7 +46,9 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
     z[1::2] = targets
     skip = np.zeros(S, bool)
     skip[2:] = (z[2:] != blank) & (z[2:] != z[:-2])
-    if not np.isfinite(frame_seconds) or frame_seconds <= 0:
+    if frame_seconds is None and not (line_blank or rest_blank or rest_token):
+        frame_seconds = 1.0  # No duration-dependent term is evaluated.
+    if frame_seconds is None or not np.isfinite(frame_seconds) or frame_seconds <= 0:
         raise ValueError('invalid frame duration')
     gap_states = np.zeros(S, bool)
     if line_blank or rest_blank:

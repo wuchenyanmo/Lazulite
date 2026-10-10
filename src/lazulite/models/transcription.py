@@ -18,15 +18,13 @@ def _validate_time(value: float | None, field_name: str) -> None:
 @dataclass(frozen=True, slots=True)
 class BackendInfo:
     name: str
-    model_id: str
-    runtime_version: str
-    precision: str
+    model_id: str | None = None
+    runtime_version: str | None = None
+    precision: str | None = None
 
     def __post_init__(self) -> None:
-        if not all(
-            (self.name, self.model_id, self.runtime_version, self.precision)
-        ):
-            raise ValueError("后端身份字段均不能为空")
+        if not self.name:
+            raise ValueError("后端名称不能为空")
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +122,7 @@ class TranscriptionResult:
 
 
 def transcription_segment_from_dict(value):
-    """Read only the current schema's complete evidence; never upgrade legacy cache rows."""
+    """Read the explicit current evidence structure."""
     return TranscriptionSegment(**{**value,
         'request_window':RequestWindow(**value['request_window']) if value['request_window'] is not None else None,
         'probability':ProbabilitySummary(**value['probability']) if value['probability'] is not None else None,

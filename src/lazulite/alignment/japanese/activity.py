@@ -2,7 +2,7 @@
 
 MIT ff2d2f54706ecb140bc5b275037eff64187ef6ef; see THIRD_PARTY_LICENSES.
 RMS and smoothing run BEFORE cutting cores. Frame windows use the decoder's
-20 ms stride, with sample-weighted original envelope integration across seams.
+explicit frame stride and offset, integrating the original envelope across seams.
 """
 import numpy as np
 from lazulite.audio.io import resample_audio
