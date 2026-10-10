@@ -14,7 +14,6 @@ from .io import resample_audio
 class DemucsConfig:
     model_name: str = "htdemucs"
     device: str = "cuda"
-    model_revision: str | None = None
     split: bool = True
     overlap: float = 0.25
     shifts: int = 1
@@ -56,33 +55,6 @@ class DemucsSeparator:
         """返回本实例实际使用的分离参数，供调用方记录可复现实验。"""
         return self._config
 
-    @property
-    def cache_identity(self) -> dict[str, object] | None:
-        """未指定权重身份时不允许缓存分离后的自动化结果。"""
-        # Hash loaded tensors, not a caller-declared model label. Loading is lazy and
-        # belongs to preparation; import/help never touches this property.
-        model = self._load()
-        if not hasattr(self, '_weights_identity'):
-            import hashlib
-            digest=hashlib.sha256()
-            for name,tensor in sorted(model.state_dict().items()):
-                value=tensor.detach().cpu().contiguous()
-                digest.update(name.encode());digest.update(str(value.dtype).encode())
-                digest.update(str(tuple(value.shape)).encode());digest.update(value.numpy().tobytes())
-            self._weights_identity='sha256:'+digest.hexdigest()
-        def installed(package: str) -> str:
-            try:
-                return version(package)
-            except PackageNotFoundError:
-                return "unavailable"
-        return {
-            "separator": "demucs",
-            "weights":self._weights_identity,
-            "model_segment":getattr(model,"segment",None),
-            "runtime_version": f"demucs {installed('demucs')}; torch {installed('torch')}",
-            "config": asdict(self._config),
-        }
-
     def separate(self, audio: AudioBuffer) -> AudioBuffer:
         prepared = resample_audio(audio, sample_rate=44_100, channels=2)
         model = self._load(); waveform = self._torch.from_numpy(prepared.samples).unsqueeze(0).to(self._config.device)
@@ -104,5 +76,3 @@ class DemucsSeparator:
     def close(self) -> None:
         # 由调用方决定是否清空 CUDA allocator，库仅结束本实例的模型所有权。
         self._model = None
-        if hasattr(self,"_weights_identity"):
-            del self._weights_identity
