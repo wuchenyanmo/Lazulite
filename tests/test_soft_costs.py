@@ -9,7 +9,9 @@ from lazulite.audio.concat import concatenate_cores
 from lazulite.audio.preparation import prepare_existing_vocals
 from lazulite.models.audio import AudioBuffer, VocalAnalysis, VocalSegment
 from lazulite.models.japanese import JapaneseAlignmentRequest, JapaneseLine, JapaneseUnit
-from lazulite.cache import FileCache
+from lazulite.alignment.japanese.stages import FrameMap
+from lazulite.alignment.japanese.run import compute_acoustics
+from fixtures.acoustic import Backend
 
 
 @pytest.mark.parametrize('switches', list(itertools.product([False, True], repeat=3)))
@@ -43,17 +45,17 @@ def test_original_activity_and_seam_mapping():
     concat = concatenate_cores(audio,segs)
     # Known original envelope: seam frame contains 10 ms from each distant piece.
     synthetic = np.r_[np.zeros(300),np.ones(100)].astype(np.float32)
-    mapped = map_rest(synthetic,concat,74)
+    mapped = map_rest(synthetic,concat.mapping,74,FrameMap(16000,320,400))
     assert mapped[48]==0 and mapped[49]==.5 and mapped[50]==1
     # Smoothing was done on original audio; the rest at the second piece start
     # still sees its actual preceding silence, not the loud first piece.
-    actual = map_rest(rest,concat,74)
+    actual = map_rest(rest,concat.mapping,74,FrameMap(16000,320,400))
     assert actual[50] > .8
     silent, reference = original_rest(AudioBuffer(np.zeros((1,80),np.float32),16000,'short'))
     assert len(silent)==1 and silent[0]==0 and reference is None
 
 
-def test_combinations_cache_isolation_and_acoustic_reuse(tmp_path, monkeypatch):
+def test_combinations_explicit_acoustic_reuse(tmp_path, monkeypatch):
     import lazulite.alignment.japanese.activity as activity
     import lazulite.alignment.japanese.run as run
     from lazulite.alignment.japanese.ctc import SoftAnchor
@@ -61,15 +63,10 @@ def test_combinations_cache_isolation_and_acoustic_reuse(tmp_path, monkeypatch):
     audio=AudioBuffer(np.ones((1,32000),np.float32)*.1,16000,'a')
     seg=VocalSegment('s',None,0,2,0,2,None,None)
     prepared=prepare_existing_vocals(audio,original_id='a',original_duration=2,
-        analysis=VocalAnalysis('a',(seg,),(),True,2),analysis_identity={'fixture':True})
+        analysis=VocalAnalysis('a',(seg,),(),True,2),analysis_description={'fixture':True})
     req=JapaneseAlignmentRequest((JapaneseLine('l','あい',(JapaneseUnit('u',(0,1),'あ','ja','user'),JapaneseUnit('v',(1,2),'い','ja','user'))),))
-    class Backend:
-        cache_identity={'fixture':'soft-costs'}
-        calls=0
-        def emissions(self,audio,**kw):
-            self.calls+=1
-            return np.zeros(((audio.samples.shape[1]-400)//320+1,32),np.float32)
-    b=Backend();cache=FileCache(tmp_path);ids=set();activity_calls=[];decodes=[]
+    b=Backend();activity_calls=[];decodes=[]
+    acoustic=compute_acoustics(prepared,backend=b)
     original=activity.frame_activity
     def tracked(*args): activity_calls.append(True);return original(*args)
     monkeypatch.setattr(activity,'frame_activity',tracked)
@@ -80,24 +77,21 @@ def test_combinations_cache_isolation_and_acoustic_reuse(tmp_path, monkeypatch):
     for flags in itertools.product([False,True],repeat=3):
         config=JapaneseConfig(line_blank=flags[0],rest_blank=flags[1],rest_token=flags[2])
         before=len(activity_calls)
-        result=align_japanese(prepared,req,backend=b,config=config,cache=cache)
+        result=align_japanese(prepared,req,acoustic=acoustic,config=config)
         assert len(activity_calls)-before == int(flags[1] or flags[2])
         assert result.calibration['adopted']=='second_pass'
         assert [(x['line_blank'],x['rest_blank'],x['rest_token']) for x in decodes[-2:]]==[flags,flags]
-        ids.add(result.execution['decode_id'])
-        repeated=align_japanese(prepared,req,backend=b,config=config,cache=cache)
+        repeated=align_japanese(prepared,req,acoustic=acoustic,config=config)
         assert repeated.units==result.units
-    assert len(ids)==8 and b.calls==1
+    assert b.calls==1
     with pytest.raises(ValueError): JapaneseConfig(line_blank=1)
 
 
-def test_disabled_costs_match_frozen_v1(tmp_path):
+def test_disabled_costs_match_frozen_v1():
     # Frozen recurrence extracted from the previous release, independent of v2.
-    import subprocess, importlib.util
+    import importlib.util
     from pathlib import Path
-    root=Path(__file__).resolve().parents[1]
-    source=subprocess.check_output(['git','show','8aef75f:src/lazulite/alignment/japanese/ctc.py'],cwd=root,text=True)
-    path=tmp_path/'ctc_v1.py';path.write_text(source)
+    path=Path(__file__).parent/'fixtures'/'ctc_v1.py'
     import sys
     spec=importlib.util.spec_from_file_location('ctc_v1',path)
     old=importlib.util.module_from_spec(spec);sys.modules[spec.name]=old;spec.loader.exec_module(old)

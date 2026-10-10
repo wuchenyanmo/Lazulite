@@ -9,7 +9,7 @@ VERSION='local-piece-completion-v1'
 def complete_units(request, units, concat, duration):
     result=list(units)
     index={u.unit_id:i for i,u in enumerate(result)}
-    pieces=[(p.source_start/16000,min(duration,p.source_end/16000)) for p in concat.pieces]
+    pieces=[(p.source_start/concat.sample_rate,min(duration,p.source_end/concat.sample_rate)) for p in concat.pieces]
     def set_timing(i,start,end,source,basis):
         if start is not None and end is not None and not start<end:
             return

@@ -14,7 +14,7 @@ def _covers(indices, total):
     return bool(indices) and min(indices)<quarter and max(indices)>=total-quarter
 
 
-def calibrate(request, units, ranges, concat):
+def calibrate(request, units, ranges, concat, frames):
     by_id={u.unit_id:u for u in units}
     votes=[]
     excluded=[]
@@ -58,12 +58,12 @@ def calibrate(request, units, ranges, concat):
     if reason:return (),report|{'reason':reason}
     anchors=[];kept=[]
     for v in support:
-        original=(v[2]+delta)*16
+        original=(v[2]+delta)*concat.sample_rate/1000
         mapped=concat.to_concat(original,endpoint='start')
         if mapped is None:
             excluded.append({'line_id':v[1],'reason':'hint_in_deleted_gap'})
             continue
-        anchors.append(SoftAnchor(ranges[v[4]][0],mapped/320))
+        anchors.append(SoftAnchor(ranges[v[4]][0],frames.index(mapped/concat.sample_rate), sigma_frames=.4/frames.seconds))
         kept.append(v[0])
     report['mapped_hints']=len(anchors)
     if len(anchors)<4 or not _covers(kept,len(request.lines)):

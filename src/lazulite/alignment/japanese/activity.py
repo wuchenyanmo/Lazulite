@@ -32,31 +32,33 @@ def original_rest(audio):
     return np.clip((ref - 8 - level) / 12, 0, 1).astype(np.float32), ref
 
 
-def map_rest(rest, concat, frames):
+def map_rest(rest, concat, frames, frame_map):
     # Envelope bin i owns [i*160, (i+1)*160). Integrate fractional bins,
     # including a frame crossing a cut, without smoothing across that cut.
     cumulative = np.r_[0., np.cumsum(rest, dtype=np.float64)] * 160
     def integral(samples):
         indices = np.floor(samples / 160).astype(np.int64)
         return cumulative[indices] + (samples - indices * 160) * rest[np.minimum(indices, len(rest)-1)]
-    lo = np.arange(frames) * 320
-    hi = lo + 320
+    scale = 16000 / concat.sample_rate
+    stride = frame_map.seconds * 16000
+    lo = (frame_map.offset_samples + np.arange(frames) * frame_map.stride_samples) * scale
+    hi = lo + stride
     values = np.zeros(frames, np.float64)
     for p in concat.pieces:
-        a, b = np.maximum(lo, p.concat_start), np.minimum(hi, p.concat_end)
+        a, b = np.maximum(lo, p.concat_start * scale), np.minimum(hi, p.concat_end * scale)
         inside = b > a
-        offset = p.source_start - p.concat_start
+        offset = (p.source_start - p.concat_start) * scale
         values[inside] += integral(b[inside] + offset) - integral(a[inside] + offset)
-    return np.clip(values / 320, 0, 1)
+    return np.clip(values / stride, 0, 1)
 
 
-def frame_activity(prepared, concat, frames):
+def frame_activity(prepared, concat, frames, frame_map):
     rest, reference = original_rest(prepared.vocals)
-    return map_rest(rest, concat, frames), {
-        'algorithm': VERSION, 'pcm_id': prepared.pcm_id, 'sample_rate': 16000,
+    return map_rest(rest, concat, frames, frame_map), {
+        'algorithm': VERSION, 'sample_rate': 16000,
         'rms_window_samples': 480, 'envelope_hop_samples': 160,
         'smoothing_ms': 300, 'reference_db': reference,
-        'frame_stride_samples': 320, 'frame_offset_samples': 0,
+        'frame_stride_seconds': frame_map.seconds, 'frame_offset_seconds': frame_map.time(0),
         'mapping': 'original envelope integral over concat pieces; no seam smoothing',
         'silent_policy': 'unavailable reference; no rest penalties',
         'available': reference is not None and reference >= -60,

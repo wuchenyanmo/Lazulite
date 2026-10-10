@@ -23,7 +23,7 @@ class SoftAnchor:
     weight: float = 4
 
 
-def decode(logp, targets, blank=29, *, anchors=(), max_decode_memory_bytes=DEFAULT_MEMORY,
+def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_MEMORY,
            cancel=None, event_sink=None, token_lines=None, frame_seconds=.02,
            line_blank=False, rest_blank=False, rest_token=False, rest=None):
     lp = np.asarray(logp)

@@ -1,43 +1,66 @@
-"""Pinned NextFire FP32 frontend, matching research 20s cores ±2s context."""
+"""Local Wav2Vec2 CTC adapter with configuration-derived vocabulary and frames."""
 from dataclasses import dataclass
 from pathlib import Path
-import hashlib
 import json
 import numpy as np
 from lazulite.events import checkpoint
-
-REVISION = '2ab2b5f46539ee284703c281f286b01d2410ee12'
-VERSION = 'nextfire-whole-normalized-old-context2-v1'
-VOCAB = {c:i+1 for i,c in enumerate('abcdefghijklmnopqrstuvwxyz')} | {'|':0,"'":27,'[UNK]':28,'[PAD]':29}
-HASHES = {
- 'model.safetensors':'4d1d6fbb543534ab32bcceac5f5a42052c7fde3d16a83cbbce858473d5735042',
- 'config.json':'665dbd5be3a170d0b53f86e702a4f65f755471a2d81c1e0cf35ba566a72bf382',
- 'processor_config.json':'8bc3c8d6d97ea61524d5c15d8554b4baf072d2264c0bda1839bc7a822c200d66',
- 'vocab.json':'26dc928520b2bde28e1c9e7fd425aae6b4eb40cd992bcb0bcc16ca6fada46491',
-}
+from .stages import FrameMap
 
 
-def chunked_forward(y, forward, *, cancel=None, event_sink=None):
+def inspect_model(path):
+    """Read small configuration files only; never instantiate or hash weights."""
+    path = Path(path)
+    config = json.loads((path/'config.json').read_text())
+    if config.get('model_type') != 'wav2vec2' or config.get('add_adapter', False):
+        raise ValueError('this adapter requires Wav2Vec2 CTC without output adapters')
+    processor = path/'preprocessor_config.json'
+    pre = json.loads(processor.read_text()) if processor.is_file() else json.loads((path/'processor_config.json').read_text())['feature_extractor']
+    vocab = json.loads((path/'vocab.json').read_text())
+    added = path/'added_tokens.json'
+    if added.is_file(): vocab.update(json.loads(added.read_text()))
+    stride, receptive = 1, 1
+    kernels, strides = config['conv_kernel'], config['conv_stride']
+    if not kernels or len(kernels) != len(strides) or any(type(v) is not int or v<=0 for v in kernels+strides):
+        raise ValueError('invalid convolution layout')
+    for kernel, step in zip(kernels,strides):
+        receptive += (kernel-1)*stride
+        stride *= step
+    frames = FrameMap(pre['sampling_rate'],stride,receptive)
+    columns, blank = config['vocab_size'], config['pad_token_id']
+    if type(columns) is not int or columns<=0 or type(blank) is not int or not 0<=blank<columns or any(type(v) is not int or not 0<=v<columns for v in vocab.values()) or len(set(vocab.values()))!=len(vocab):
+        raise ValueError('invalid model vocabulary/output layout')
+    if not any((path/name).is_file() for name in ('model.safetensors','pytorch_model.bin','model.safetensors.index.json','pytorch_model.bin.index.json')):
+        raise ValueError('model weights are missing')
+    if pre.get('feature_size') != 1 or type(pre.get('do_normalize')) is not bool:
+        raise ValueError('explicit mono feature extractor configuration required')
+    return vocab, blank, columns, frames, pre['do_normalize']
+
+
+def chunked_forward(y, forward, *, frames, vocabulary_size, normalize=True, cancel=None, event_sink=None):
     if y.ndim != 1 or y.dtype != np.float32 or not np.isfinite(y).all():
-        raise ValueError('expected finite float32 mono 16kHz waveform')
-    n = max(0,(len(y)-400)//320+1)
-    if n == 0:
-        return np.empty((0,32),np.float32)
-    # Exactly the Wav2Vec2FeatureExtractor whole-waveform normalization.
-    y = (y-y.mean())/np.sqrt(y.var()+1e-7)
-    result, covered = np.empty((n,32),np.float32), np.zeros(n,np.uint8)
-    total = (len(y)+319999)//320000
-    for i,core in enumerate(range(0,len(y),320000)):
+        raise ValueError('expected finite float32 mono waveform')
+    n = frames.count(len(y))
+    if not n: return np.empty((0,vocabulary_size),np.float32)
+    if normalize: y = (y-y.mean())/np.sqrt(y.var()+1e-7)
+    result, covered = np.empty((n,vocabulary_size),np.float32), np.zeros(n,np.uint8)
+    stride = frames.stride_samples
+    core_frames = max(1,round(20*frames.sample_rate/stride))
+    context_frames = max(1,round(2*frames.sample_rate/stride))
+    total = (n+core_frames-1)//core_frames
+    for i,start in enumerate(range(0,n,core_frames)):
         checkpoint(cancel,event_sink,'acoustic',i,total)
-        lo,hi = max(0,core-32000), min(len(y),core+352000)
+        stop = min(n,start+core_frames)
+        lo = max(0,start-context_frames)*stride
+        hi = min(len(y),(start+core_frames+context_frames)*stride)
+        # Small receptive fields/strides and final cores still need their complete receptive window.
+        hi = min(len(y),max(hi,(stop-1)*stride+frames.receptive_samples))
         lp = forward(y[lo:hi].copy())
-        if lp.shape != ((hi-lo-400)//320+1,32) or not np.isfinite(lp).all():
-            raise ValueError('unexpected NextFire frame count/vocabulary/values')
-        ix = np.arange(len(lp))+lo//320
-        keep = (ix>=core//320)&(ix<min((core+320000)//320,n))
+        if lp.shape != (frames.count(hi-lo),vocabulary_size) or not np.isfinite(lp).all():
+            raise ValueError('unexpected acoustic frame count/vocabulary/values')
+        ix=np.arange(len(lp))+lo//stride
+        keep=(ix>=start)&(ix<stop)
         result[ix[keep]]=lp[keep]; covered[ix[keep]]+=1
-    if not (covered == 1).all():
-        raise ValueError('acoustic cores must cover each frame exactly once')
+    if not (covered==1).all(): raise ValueError('acoustic cores must cover each frame exactly once')
     checkpoint(cancel,event_sink,'acoustic',total,total)
     return result
 
@@ -46,59 +69,40 @@ def chunked_forward(y, forward, *, cancel=None, event_sink=None):
 class NextFireConfig:
     model_path: Path
     device: str = 'cpu'
-    revision: str = REVISION
-
-    def __post_init__(self):
-        if self.revision != REVISION:
-            raise ValueError('unsupported NextFire revision')
 
 
 class NextFireBackend:
-    vocab = VOCAB
-    blank = 29
-
     def __init__(self, config: NextFireConfig):
-        self.config = config
-        self._model = None
-        self._verified = False
-
-    def _verify(self):
-        if self._verified:
-            return
-        for name, expected in HASHES.items():
-            with (Path(self.config.model_path)/name).open('rb') as f:
-                actual = hashlib.file_digest(f,'sha256').hexdigest()
-            if actual != expected:
-                raise ValueError(f'NextFire content identity mismatch: {name}')
-        self._verified = True
+        self.config=config
+        self.vocab,self.blank,self.vocabulary_size,self.frames,self.normalize=inspect_model(config.model_path)
+        self.special_tokens=tuple(k for k in self.vocab if len(k)!=1 or k=='|')
+        self._model=None
 
     @property
-    def cache_identity(self):
-        self._verify()
-        from importlib.metadata import version
-        return {'revision':REVISION,'files':HASHES,'algorithm':VERSION,'dtype':'float32',
-                'device':self.config.device,'torch':version('torch'),'transformers':version('transformers')}
+    def description(self):
+        return {'adapter':'wav2vec2-ctc','model_path':str(self.config.model_path),
+                'device':self.config.device,'dtype':'float32','normalize':self.normalize}
 
-    def emissions(self, audio, *, cancel=None, event_sink=None):
-        if audio.sample_rate != 16000 or audio.samples.shape[0] != 1:
-            raise ValueError('NextFire requires mono 16 kHz')
-        self._verify()
-        if audio.samples.shape[1] < 400:
-            return np.empty((0,32),np.float32)
+    def emissions(self,audio,*,cancel=None,event_sink=None):
+        if audio.sample_rate!=self.frames.sample_rate or audio.samples.shape[0]!=1:
+            raise ValueError('acoustic input does not match configured sample rate/channels')
+        if self.frames.count(audio.samples.shape[1])==0:
+            return np.empty((0,self.vocabulary_size),np.float32)
         if self._model is None:
             import torch
-            self._torch = torch
+            self._torch=torch
             from lazulite._runtime import preserve_random_state
             with preserve_random_state(torch):
                 from transformers import Wav2Vec2ForCTC
-                self._model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path, local_files_only=True,
-                                                           dtype=torch.float32).to(self.config.device).eval()
+                self._model=Wav2Vec2ForCTC.from_pretrained(self.config.model_path,local_files_only=True,
+                    dtype=torch.float32).to(self.config.device).eval()
         def forward(y):
-            t = self._torch
+            t=self._torch
             from lazulite._runtime import preserve_random_state
-            with preserve_random_state(t), t.inference_mode():
+            with preserve_random_state(t),t.inference_mode():
                 return self._model(t.from_numpy(y).unsqueeze(0).to(self.config.device)).logits[0].log_softmax(-1).cpu().numpy()
-        return chunked_forward(audio.samples[0],forward,cancel=cancel,event_sink=event_sink)
+        return chunked_forward(audio.samples[0],forward,frames=self.frames,vocabulary_size=self.vocabulary_size,
+                               normalize=self.normalize,cancel=cancel,event_sink=event_sink)
 
     def close(self):
-        self._model = None
+        self._model=None

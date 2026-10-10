@@ -2,13 +2,12 @@
 from dataclasses import asdict, dataclass, replace
 import numpy as np
 from lazulite.audio.concat import concatenate_cores
-from lazulite.cache import cache_key
 from lazulite.events import checkpoint, ProgressEvent
 from lazulite.models.audio import PreparedVocals
 from lazulite.models.japanese import (
     Endpoint, Timing, JapaneseAlignmentRequest, JapaneseAlignmentResult, JapaneseUnitResult, JapaneseIssue,
 )
-from .backend import VOCAB, VERSION as ACOUSTIC_VERSION
+from .stages import AcousticResult, DecodeResult
 from .ctc import decode, NoFeasiblePath, DEFAULT_MEMORY, VERSION as CTC_VERSION
 from .profile import JaHepburnProfile, is_hold
 from .kana import is_kana_text
@@ -30,7 +29,7 @@ class JapaneseConfig:
             raise ValueError('invalid Japanese configuration')
 
 
-def _profile(request):
+def _profile(request, vocabulary, blank, special_tokens=(), encoder=None):
     texts, tokens, ranges, problems = {}, [], {}, {}
     profile = JaHepburnProfile()
     for line in request.lines:
@@ -41,23 +40,25 @@ def _profile(request):
         for u,text in zip(line.units,values):
             texts[u.unit_id] = text
             begin = len(tokens)
-            if text and all(c in VOCAB and c not in '| ' for c in text):
-                tokens.extend(VOCAB[c] for c in text)
+            encoded = encoder(text, vocabulary) if encoder is not None and text else ([vocabulary[c] for c in text] if text and all(c in vocabulary and c not in special_tokens and c not in '| ' and vocabulary[c] != blank for c in text) else None)
+            if encoded:
+                if any(type(t) is not int or t == blank or t not in vocabulary.values() for t in encoded):
+                    raise ValueError('encoder produced invalid target IDs')
+                tokens.extend(encoded)
             else:
                 problems[u.unit_id] = 'profile_hold' if u.reading_language=='ja' and is_hold(u.reading) else 'unresolved_reading'
             ranges[u.unit_id] = (begin,len(tokens))
     return texts,tokens,ranges,problems
 
 
-def _intervals(request, spans, ranges):
+def _intervals(request, spans, ranges, frames):
     raw = {}
     sources = {}
     for line in request.lines:
         rows = []
         for u in line.units:
             a,b = ranges[u.unit_id]
-            # FrameMap(16000,320,0,0), integer milliseconds, matching frozen upstream.
-            rows.append([spans[a][0]*20,spans[b-1][1]*20] if b>a else None)
+            rows.append([int(round(frames.time(spans[a][0])*1000)),int(round(frames.time(spans[b-1][1])*1000))] if b>a else None)
         i=0
         while i<len(rows):
             j=i+1
@@ -67,8 +68,8 @@ def _intervals(request, spans, ranges):
                 a,b=rows[i]
                 nxt=next((r[0] for r in rows[j:] if r is not None),None)
                 end=b+(min(800,max(0,nxt-b)) if nxt is not None else 300)
-                end=max(end,a+20*(j-i))
-                if nxt is not None and nxt>=a+20*(j-i):
+                end=max(end,a+frames.seconds*1000*(j-i))
+                if nxt is not None and nxt>=a+frames.seconds*1000*(j-i):
                     end=min(end,nxt)
                 step=(end-a)/(j-i)
                 for k in range(i,j):
@@ -80,8 +81,8 @@ def _intervals(request, spans, ranges):
     return raw,sources
 
 
-def _units(request,texts,ranges,problems,spans,concat):
-    intervals,sources=_intervals(request,spans,ranges)
+def _units(request,texts,ranges,problems,spans,concat,frames):
+    intervals,sources=_intervals(request,spans,ranges,frames)
     units=[]
     for line in request.lines:
         for u in line.units:
@@ -94,9 +95,9 @@ def _units(request,texts,ranges,problems,spans,concat):
             if interval is not None:
                 a,b=interval
                 # Preserve baseline hold extension as evidence; report clipped acoustic domain.
-                if b>concat.audio.duration:
+                if b>concat.duration:
                     issue.append(JapaneseIssue(u.unit_id,'profile_outside_audio',{'end':b}))
-                    b=concat.audio.duration
+                    b=concat.duration
                 if b>a:
                     fragments=concat.fragments(a,b)
                     source=sources.get(u.unit_id,'acoustic_path')
@@ -105,8 +106,8 @@ def _units(request,texts,ranges,problems,spans,concat):
             if cross:
                 issue.append(JapaneseIssue(u.unit_id,'crosses_removed_gap'))
             a,b=ranges[u.unit_id]
-            chars=tuple({'character':texts[u.unit_id][k-a], 'frames':s,
-                         'concat_start':s[0]*.02,'concat_end':s[1]*.02} for k,s in enumerate(spans[a:b],a))
+            chars=tuple({'character':texts[u.unit_id][k-a] if len(texts[u.unit_id]) == b-a else None, 'frames':s,
+                         'concat_start':frames.time(s[0]),'concat_end':frames.time(s[1])} for k,s in enumerate(spans[a:b],a))
             units.append(JapaneseUnitResult(u.unit_id,line.line_id,u.reading,texts[u.unit_id],timing,
                 Timing() if cross else timing,fragments,interval,cross,
                 sum(y.start-x.end for x,y in zip(fragments,fragments[1:])),chars,tuple(issue)))
@@ -134,96 +135,123 @@ def _result(request,units,execution,calibration,issues=()):
         'empty_targets':sum(not u.model_text for u in units)},calibration,execution,tuple(issues))
 
 
-def align_japanese(prepared: PreparedVocals, request: JapaneseAlignmentRequest, *, backend,
-                   config: JapaneseConfig = JapaneseConfig(), cache=None, cancel=None, event_sink=None):
-    request.__post_init__()
-    prepared.__post_init__()
-    checkpoint(cancel,event_sink,'prepare')
-    texts,tokens,ranges,problems=_profile(request)
-    execution={'adoption_policy':'proposed_endpoints_only; null_means_no_new_suggestion','route':'japanese','profile':'ja-hepburn/2','ctc':CTC_VERSION,'config':asdict(config),
-               'pcm_id':prepared.pcm_id,'original_id':prepared.original_id,'segment_source':prepared.segment_source,
-               'auto_conflict':prepared.segment_source=='manual' and prepared.analysis.is_vocal is False,
-               'request_id':cache_key(asdict(request)), 'input':asdict(request), 'score_definition':'frame log probabilities + one-time anchor entry penalties + per-frame soft costs'}
-    reason=None
-    if prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False:
-        reason='no_vocal_evidence'
-    elif not tokens:
-        reason='no_emittable_targets'
-    checkpoint(cancel,event_sink,'concat')
-    concat=concatenate_cores(prepared.vocals,prepared.segments)
-    execution['pieces']=[asdict(p) for p in concat.pieces]
-    if concat.audio.samples.shape[1]<400:
-        reason=reason or 'insufficient_audio'
-    spans=None
-    if reason is None:
-        identity=getattr(backend,'cache_identity',None)
-        identity=identity() if callable(identity) else identity
-        execution['backend']=identity
-        acoustic_key=cache_key({'pcm':prepared.pcm_id,'pieces':execution['pieces'],'backend':identity,'algorithm':ACOUSTIC_VERSION,
-                                'resampling':'mean-stereo;ffmpeg-swr32-phase10-cutoff097-pad64-ceil-v1'}) if identity is not None else None
-        lp=cache.get_array(acoustic_key) if cache is not None and acoustic_key is not None else None
-        if lp is None:
-            lp=backend.emissions(concat.audio,cancel=cancel,event_sink=event_sink)
-            if cache is not None and acoustic_key is not None:
-                cache.set_array(acoustic_key,lp)
-        if lp.shape != (max(0,(concat.audio.samples.shape[1]-400)//320+1),32):
-            raise ValueError('acoustic artifact frame/vocabulary shape mismatch')
-        execution['acoustic_id']=acoustic_key
-        from .activity import frame_activity
-        rest, activity = frame_activity(prepared, concat, len(lp)) if config.rest_blank or config.rest_token else (None, None)
-        priors = {'line_blank': config.line_blank, 'rest_blank': config.rest_blank, 'rest_token': config.rest_token}
-        execution['soft_costs'] = {**priors, 'per_second': {'line_blank': int(config.line_blank),
-            'rest_blank': 4 * int(config.rest_blank), 'rest_token': 25 * int(config.rest_token)}, 'activity': activity}
-        token_lines = [line.line_id for line in request.lines for u in line.units for _ in range(*ranges[u.unit_id])]
-        decode_options = {**priors, 'token_lines': token_lines, 'frame_seconds': .02, 'rest': rest}
 
+def compute_acoustics(prepared: PreparedVocals, *, backend, include_activity=False, cancel=None, event_sink=None):
+    prepared.__post_init__()
+    checkpoint(cancel,event_sink,'concat')
+    segments=() if prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False else prepared.segments
+    concat=concatenate_cores(prepared.vocals,segments,sample_rate=backend.frames.sample_rate)
+    lp=backend.emissions(concat.audio,cancel=cancel,event_sink=event_sink)
+    if lp.shape != (backend.frames.count(concat.audio.samples.shape[1]),backend.vocabulary_size):
+        raise ValueError('acoustic output shape does not match backend frame contract')
+    rest,activity=None,None
+    if include_activity:
+        from .activity import frame_activity
+        rest,activity=frame_activity(prepared,concat.mapping,len(lp),backend.frames)
+    checkpoint(cancel)
+    return AcousticResult(lp,dict(backend.vocab),backend.blank,backend.frames,concat.mapping,
+        prepared.original_duration,rest,{'backend':backend.description,'activity':activity,
+        'original_id':prepared.original_id,'segment_source':prepared.segment_source,
+        'no_vocal':prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False,
+        'auto_conflict':prepared.segment_source=='manual' and prepared.analysis.is_vocal is False},
+        tuple(backend.special_tokens))
+
+
+def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest, *,
+                    config=JapaneseConfig(), prepared=None, encoder=None, cancel=None, event_sink=None):
+    request.__post_init__()
+    acoustic.__post_init__()
+    checkpoint(cancel,event_sink,'decode')
+    texts,tokens,ranges,problems=_profile(request,acoustic.vocabulary,acoustic.blank_id,acoustic.special_tokens,encoder)
+    concat,frames,lp=acoustic.mapping,acoustic.frames,acoustic.log_probabilities
+    execution={'adoption_policy':'proposed_endpoints_only; null_means_no_new_suggestion','route':'japanese',
+        'profile':'ja-hepburn/2' if encoder is None else 'custom-encoder','ctc':CTC_VERSION,'config':asdict(config),
+        'input':asdict(request),'pieces':[asdict(p) for p in concat.pieces],**acoustic.description,
+        'frames':asdict(frames),'score_definition':'frame log probabilities + one-time anchor entry penalties + per-frame soft costs'}
+    reason='no_vocal_evidence' if acoustic.description.get('no_vocal') else 'no_emittable_targets' if not tokens else 'insufficient_audio' if not len(lp) else None
+    spans=first=None
+    calibration={'mode':config.hint_mode,'adopted':'first_pass','reason':'hints_off'}
+    rest=acoustic.rest
+    if config.rest_blank or config.rest_token:
+        if rest is None:
+            if prepared is None: raise ValueError('rest costs require frame activity or complete vocals')
+            prepared.__post_init__()
+            expected=concatenate_cores(prepared.vocals,prepared.segments,sample_rate=frames.sample_rate).mapping
+            if expected!=concat or prepared.original_duration!=acoustic.original_duration:
+                raise ValueError('activity vocals do not match acoustic coordinates')
+            from .activity import frame_activity
+            rest,activity=frame_activity(prepared,concat,len(lp),frames)
+            execution['activity']=activity
+    priors={k:getattr(config,k) for k in ('line_blank','rest_blank','rest_token')}
+    execution['soft_costs']={**priors,'per_second':{'line_blank':int(config.line_blank),
+        'rest_blank':4*int(config.rest_blank),'rest_token':25*int(config.rest_token)},
+        'activity':execution.get('activity')}
+    options={**priors,'blank':acoustic.blank_id,
+        'token_lines':[l.line_id for l in request.lines for u in l.units for _ in range(*ranges[u.unit_id])],
+        'frame_seconds':frames.seconds,'rest':rest,'max_decode_memory_bytes':config.max_decode_memory_bytes,
+        'cancel':cancel,'event_sink':event_sink}
+    if reason is None:
         try:
-            decode_key=cache_key({'stage':'japanese-decode-v1','acoustic':acoustic_key,
-                                  'request':asdict(request),'profile':'ja-hepburn/2','ctc':CTC_VERSION, 'soft_costs': execution['soft_costs']}) if acoustic_key else None
-            execution['decode_id'] = decode_key
-            cached=cache.get_json(decode_key) if cache is not None and decode_key else None
-            if cached is not None:
-                try:
-                    if cached['schema']!='ctc-path-v1':raise ValueError('schema')
-                    spans=[tuple(s) for s in cached['spans']];score=cached['score']
-                    if len(spans)!=len(tokens) or any(not 0<=a<b<=len(lp) for a,b in spans) or not np.isfinite(score):
-                        raise ValueError('invalid cached CTC path')
-                except (KeyError,TypeError,ValueError):cached=None
-            if cached is None:
-                spans,score=decode(lp,tokens, **decode_options, max_decode_memory_bytes=config.max_decode_memory_bytes,cancel=cancel,event_sink=event_sink)
-                if cache is not None and decode_key:
-                    cache.set_json(decode_key,{'schema':'ctc-path-v1','spans':spans,'score':score})
+            spans,score=decode(lp,tokens,**options)
+            first=tuple(spans)
             execution['first_pass_score']=score
         except NoFeasiblePath:
             reason='no_feasible_path'
-    if spans is None:
-        units=tuple(JapaneseUnitResult(u.unit_id,l.line_id,u.reading,texts[u.unit_id],Timing(),Timing(),
-                    issues=(JapaneseIssue(u.unit_id,reason),)) for l in request.lines for u in l.units)
-    else:
-        units=_units(request,texts,ranges,problems,spans,concat)
-    calibration={'mode':config.hint_mode,'adopted':'first_pass','reason':'hints_off'}
     if spans is not None and config.hint_mode=='auto':
         from .calibration import calibrate
         checkpoint(cancel,event_sink,'calibration')
-        anchors,calibration=calibrate(request,units,ranges,concat)
+        units=_units(request,texts,ranges,problems,spans,concat,frames)
+        anchors,calibration=calibrate(request,units,ranges,concat,frames)
         calibration['mode']='auto'
-        execution['first_pass_id']=cache_key({'spans':spans,'request':execution['request_id']})
         if anchors:
             try:
-                second,score=decode(lp,tokens,anchors=anchors,**decode_options,max_decode_memory_bytes=config.max_decode_memory_bytes,
-                                    cancel=cancel,event_sink=event_sink)
-                units=_units(request,texts,ranges,problems,second,concat)
-                execution['second_pass_id']=cache_key({'spans':second,'anchors':[asdict(a) for a in anchors]})
+                spans,score=decode(lp,tokens,anchors=anchors,**options)
                 execution['second_pass_score']=score
                 calibration['adopted']='second_pass'
             except NoFeasiblePath:
                 calibration['reason']='second_pass_infeasible'
-    if spans is not None and config.completion:
-        from .completion import complete_units, VERSION as COMPLETION_VERSION
-        checkpoint(cancel,event_sink,'completion')
-        units=complete_units(request,units,concat,prepared.original_duration)
-        execution['completion']=COMPLETION_VERSION
-    issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in problems.values()) else []
+    checkpoint(cancel)
+    return DecodeResult(request,tuple(tokens),dict(acoustic.vocabulary),acoustic.blank_id,ranges,texts,problems,first,tuple(spans) if spans is not None else None,
+        len(lp),frames,concat,acoustic.original_duration,execution,calibration,reason)
+
+
+def finalize_japanese(decoded: DecodeResult, *, completion=True, cancel=None,event_sink=None):
+    decoded.__post_init__()
+    checkpoint(cancel,event_sink,'completion')
+    request=decoded.request
+    execution={**decoded.execution,'config':{**decoded.execution['config'],'completion':completion}}
+    if decoded.spans is None:
+        units=tuple(JapaneseUnitResult(u.unit_id,l.line_id,u.reading,decoded.texts[u.unit_id],Timing(),Timing(),
+            issues=(JapaneseIssue(u.unit_id,decoded.reason),)) for l in request.lines for u in l.units)
+    else:
+        units=_units(request,decoded.texts,decoded.ranges,decoded.problems,decoded.spans,decoded.mapping,decoded.frames)
+        if completion:
+            from .completion import complete_units, VERSION as COMPLETION_VERSION
+            units=complete_units(request,units,decoded.mapping,decoded.original_duration)
+            execution['completion']=COMPLETION_VERSION
+    issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in decoded.problems.values()) else []
     checkpoint(cancel)
     if event_sink is not None:event_sink(ProgressEvent('japanese','completed'))
-    return _result(request,units,execution,calibration,issues)
+    return _result(request,units,execution,dict(decoded.calibration),issues)
+
+
+def align_japanese(prepared: PreparedVocals | None, request: JapaneseAlignmentRequest, *, backend=None,
+                   acoustic: AcousticResult | None=None, decoded: DecodeResult | None=None,
+                   config=JapaneseConfig(), encoder=None, cancel=None,event_sink=None):
+    if decoded is not None:
+        if acoustic is not None or prepared is not None or backend is not None or encoder is not None:
+            raise ValueError('decoded result is a complete input; conflicting earlier-stage sources')
+        if request != decoded.request: raise ValueError('decoded targets differ from request')
+        expected={k:v for k,v in asdict(config).items() if k!='completion'}
+        actual={k:v for k,v in decoded.execution['config'].items() if k!='completion'}
+        if expected!=actual: raise ValueError('decode configuration differs; decode again explicitly')
+    else:
+        if acoustic is None:
+            if prepared is None or backend is None: raise ValueError('complete vocals and acoustic backend required')
+            acoustic=compute_acoustics(prepared,backend=backend,include_activity=config.rest_blank or config.rest_token,
+                                       cancel=cancel,event_sink=event_sink)
+        elif backend is not None:
+            raise ValueError('acoustic result conflicts with acoustic backend')
+        decoded=decode_japanese(acoustic,request,config=config,prepared=prepared,encoder=encoder,
+                                cancel=cancel,event_sink=event_sink)
+    return finalize_japanese(decoded,completion=config.completion,cancel=cancel,event_sink=event_sink)
