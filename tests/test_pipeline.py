@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from lazulite.cache import FileCache, cache_key
 
 from lazulite.models.audio import AudioBuffer, VocalSegment
 from lazulite.audio.activity import VocalConfig
@@ -22,7 +21,7 @@ import lazulite.pipeline as pipeline_module
 
 
 class _RecordingBackend:
-    info = BackendInfo("fake", "fake/model", "test", "test", "float32")
+    info = BackendInfo("fake", "fake/model", "test", "float32")
     capabilities = TranscriberCapabilities("none", context=False, max_audio_seconds=4.0)
 
     def __init__(self) -> None:
@@ -48,27 +47,6 @@ class _RecordingBackend:
     def close(self) -> None:
         pass
 
-    @property
-    def cache_identity(self):
-        return {"backend": {"name": "fake", "revision": "test"}, "config": {"distribution_output_dir": None}, "recipe": "test-v1"}
-
-
-class _DistributionBackend(_RecordingBackend):
-    def __init__(self, distribution_path) -> None:
-        super().__init__(); self._distribution_path = distribution_path
-
-    @property
-    def cache_identity(self):
-        return {"backend": {"name": "fake", "revision": "test"}, "config": {"distribution_output_dir": str(self._distribution_path.parent)}, "recipe": "test-v1"}
-
-    def transcribe(self, inputs, *, request: TranscriptionRequest):
-        self.inputs = tuple(inputs)
-        self._distribution_path.write_bytes(b"npz")
-        return tuple(
-            TranscriptionSegment(item.segment.id, f"window-{index}", request.language, None, None, None, None, (), {"distribution_file": str(self._distribution_path)})
-            for index, item in enumerate(inputs)
-        )
-
 
 def test_transcription_runner_splits_long_windows_without_changing_source_id() -> None:
     audio = AudioBuffer(np.zeros((1, 12_000), dtype=np.float32), 1_000, "audio")
@@ -86,12 +64,6 @@ def test_transcription_runner_splits_long_windows_without_changing_source_id() -
     assert all(item.start is None for item in result.segments)
 
 
-def test_file_cache_uses_deterministic_keys(tmp_path) -> None:
-    cache = FileCache(tmp_path)
-    key = cache_key({"stage": "test", "value": [1, 2]})
-    cache.set_json(key, {"ok": True})
-    assert cache.get_json(key) == {"ok": True}
-    assert key == cache_key({"value": [1, 2], "stage": "test"})
 
 
 def test_pipeline_injects_backend_without_writing_audio():
@@ -114,20 +86,6 @@ def test_pipeline_keeps_all_lines_unresolved_when_no_vocals_are_detected() -> No
     assert all(line.timing_source == "unresolved" for line in result.alignment.lines)
 
 
-def test_pipeline_reuses_complete_result_only_for_a_content_addressed_cache_key(tmp_path) -> None:
-    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
-    document = LyricDocument((LyricLine("L1", "window-0"),))
-    config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
-    cache = FileCache(tmp_path)
-    first = _RecordingBackend()
-    second = _RecordingBackend()
-
-    AlignmentPipeline(transcriber=first, cache=cache).run(audio, document, config=config)
-    cached = AlignmentPipeline(transcriber=second, cache=cache).run(audio, document, config=config)
-
-    assert first.inputs
-    assert second.inputs == ()
-    assert cached.alignment.lines[0].line_id == "L1"
 
 
 def test_explicit_offset_requires_complete_source_times_before_running_models() -> None:
@@ -161,49 +119,46 @@ def test_hybrid_refinement_receives_the_dp_match_result(monkeypatch) -> None:
     assert result.alignment.strategy == "hybrid"
 
 
-def test_pipeline_recomputes_when_cached_full_distribution_was_removed(tmp_path) -> None:
-    audio = AudioBuffer(np.ones((1, 8_000), dtype=np.float32) * 0.5, 1_000, "sha256:audio")
-    document = LyricDocument((LyricLine("L1", "window-0"),))
-    config = PipelineConfig(mode="dp", vocal=VocalConfig(min_segment_seconds=0.2))
-    cache = FileCache(tmp_path / "cache")
-    distribution = tmp_path / "distribution.npz"
-    first = _DistributionBackend(distribution)
-    second = _DistributionBackend(distribution)
-
-    AlignmentPipeline(transcriber=first, cache=cache).run(audio, document, config=config)
-    distribution.unlink()
-    AlignmentPipeline(transcriber=second, cache=cache).run(audio, document, config=config)
-
-    assert first.inputs
-    assert second.inputs
-    assert distribution.is_file()
 
 
-def test_transcription_cache_survives_alignment_policy_change_and_cancels(tmp_path):
-    import numpy as np
-    import pytest
+
+
+def test_explicit_stages_skip_backend_and_invalid_windows_fail(tmp_path):
     from dataclasses import replace
-    from lazulite.models.audio import AudioBuffer,VocalSegment
-    from lazulite.models.transcription import BackendInfo,TranscriptionSegment
-    from lazulite.transcription.base import TranscriberCapabilities
-    from lazulite.transcription.run import transcribe_segments,TranscriptionConfig
-    from lazulite.transcription.evidence import EvidenceConfig
-    from lazulite.events import Cancelled
-    class Backend:
-        info=BackendInfo('fixture','model','r','v','f32')
-        capabilities=TranscriberCapabilities('none',False,30)
-        cache_identity={'files':{'model':'fixture-hash'}}
-        calls=0
-        def transcribe(self,inputs,*,request):
-            self.calls+=1
-            return tuple(TranscriptionSegment(i.segment.id,'hello',None,None,None,None,None,(),{}) for i in inputs)
-    b=Backend();audio=AudioBuffer(np.zeros((1,32000),np.float32),16000,'same-label')
-    segments=(VocalSegment('s',None,0,2,0,2,None,None),)
-    cache=FileCache(tmp_path)
-    transcribe_segments(audio,segments,transcriber=b,cache=cache)
-    transcribe_segments(audio,segments,transcriber=b,cache=cache,config=TranscriptionConfig(evidence=EvidenceConfig('whisper-lexical-v1')))
-    assert b.calls==1
-    audio.samples[:]=1
-    transcribe_segments(audio,segments,transcriber=b,cache=cache)
-    assert b.calls==2
-    with pytest.raises(Cancelled):transcribe_segments(audio,segments,transcriber=b,cache=cache,cancel=lambda:True)
+    from lazulite.exchange import write_transcriptions,read_transcriptions
+    audio=AudioBuffer(np.ones((1,8000),np.float32)*.5,1000,'audio')
+    doc=LyricDocument((LyricLine('L1','window-0'),))
+    cfg=PipelineConfig(mode='dp',vocal=VocalConfig(min_segment_seconds=.2))
+    first=AlignmentPipeline(transcriber=_RecordingBackend()).run(audio,doc,config=cfg)
+    path=tmp_path/'transcriptions.json'
+    write_transcriptions(path,first.transcriptions)
+    supplied=read_transcriptions(path)
+    second=AlignmentPipeline().run(audio,doc,config=cfg,transcriptions=supplied)
+    assert second.alignment==first.alignment and second.transcription==first.transcription
+    stage=supplied['full']
+    bad=replace(stage,result=replace(stage.result,segments=stage.result.segments[:-1]))
+    with pytest.raises(ValueError,match='missing request windows'):
+        AlignmentPipeline(transcriber=_RecordingBackend()).run(audio,doc,config=cfg,transcriptions={'full':bad})
+    with pytest.raises(ValueError,match='conditions'):
+        AlignmentPipeline().run(audio,doc,config=replace(cfg,language='en'),transcriptions=supplied)
+
+
+def test_auto_keeps_preselection_and_full_timing_conditions_separate(monkeypatch):
+    from dataclasses import replace
+    class Fine(_RecordingBackend):
+        capabilities=TranscriberCapabilities('subword',True,4)
+    rejected=LineAlignmentResult((), 'offset',False,())
+    monkeypatch.setattr(pipeline_module,'align_with_offset',lambda *args,**kw:rejected)
+    audio=AudioBuffer(np.ones((1,8000),np.float32)*.5,1000,'audio')
+    doc=LyricDocument((LyricLine('L1','window-0',0.,1.),))
+    cfg=PipelineConfig(mode='auto',vocal=VocalConfig(min_segment_seconds=.2))
+    first=AlignmentPipeline(transcriber=Fine()).run(audio,doc,config=cfg)
+    stages=first.transcriptions
+    assert set(stages)=={'preselected','full'}
+    assert stages['preselected'].request.include_timing is False
+    assert stages['full'].request.include_timing is True
+    assert AlignmentPipeline().run(audio,doc,config=cfg,transcriptions=stages).alignment==first.alignment
+    with pytest.raises(ValueError,match='missing transcription stage: full'):
+        AlignmentPipeline().run(audio,doc,config=cfg,transcriptions={'preselected':stages['preselected']})
+    with pytest.raises(ValueError,match='conditions'):
+        AlignmentPipeline().run(audio,doc,config=cfg,transcriptions={'preselected':stages['full']})

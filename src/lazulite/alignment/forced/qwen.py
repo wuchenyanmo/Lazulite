@@ -16,7 +16,6 @@ from lazulite.models.transcription import BackendInfo
 class QwenForcedAlignmentConfig:
     model_path: Path
     model_id: str
-    revision: str
     device_map: str = "cuda:0"
     precision: str = "bfloat16"
     attention_implementation: str = "sdpa"
@@ -32,7 +31,7 @@ class QwenForcedAligner:
             raise RuntimeError("Qwen forced alignment 需要 lazulite[forced-qwen]") from error
         self._torch = torch
         self._model = Qwen3ForcedAligner.from_pretrained(str(config.model_path), dtype=getattr(torch, config.precision), device_map=config.device_map, attn_implementation=config.attention_implementation)
-        self.info = BackendInfo("qwen-forced", config.model_id, config.revision, f"qwen-asr {version('qwen-asr')}; torch {torch.__version__}", config.precision)
+        self.info = BackendInfo("qwen-forced", config.model_id, f"qwen-asr {version('qwen-asr')}; torch {torch.__version__}", config.precision)
 
     @staticmethod
     def _granularity(text: str) -> str:

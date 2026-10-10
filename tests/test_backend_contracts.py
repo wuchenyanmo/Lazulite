@@ -33,7 +33,6 @@ def test_token_scores_use_full_distribution_without_renormalizing_top_k(tmp_path
         lexical_steps=[0, 1],
         source_segment_id="segment-1",
         model_id="example",
-        tokenizer_revision="revision",
     )
 
     assert summary.scores[0].logprob == pytest.approx(-0.8619948)

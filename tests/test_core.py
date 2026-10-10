@@ -218,7 +218,7 @@ def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: P
     candidates = search_lyrics(metadata, providers=(provider,))
     fetched = fetch_lyrics(candidates, providers=(provider,))
     transcription = TranscriptionResult(
-        BackendInfo("test", "test/model", "revision", "runtime", "float32"),
+        BackendInfo("test", "test/model", "runtime", "float32"),
         (TranscriptionSegment("segment", "夜空を見上げて", "ja", None, None, None, None, (), {}),),
     )
     ranked = rank_lyrics(fetched, transcription, providers=(provider,))

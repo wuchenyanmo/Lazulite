@@ -7,9 +7,8 @@ from dataclasses import asdict, dataclass, replace
 from typing import Literal
 from .evidence import transcription_quality, EvidenceConfig, repetition, eligible_for_transcription
 
-from lazulite.models.audio import AudioBuffer, VocalSegment, pcm_identity
+from lazulite.models.audio import AudioBuffer, VocalSegment
 from lazulite.models.transcription import TranscriptionResult, RequestWindow, transcription_segment_from_dict
-from lazulite.cache import cache_key
 
 from .base import Transcriber, TranscriptionInput, TranscriptionRequest
 
@@ -63,7 +62,7 @@ def build_transcription_inputs(audio, segments, *, maximum_seconds):
             core_start,core_end=max(a,segment.core_start),min(b,segment.core_end)
             if core_end <= core_start:
                 core_start=core_end=None
-            window=RequestWindow(cache_key({'source':audio.source_id,'parent':segment.id,'samples':[start_sample,end_sample],'rate':audio.sample_rate}),
+            window=RequestWindow(f'{segment.id}:{start_sample}:{end_sample}',
                 segment.id,a,b,core_start,core_end,len(expanded),segment.section_id,segment.presence,segment.off_center_risk)
             expanded.append(TranscriptionInput(audio,window))
             start=end
@@ -84,7 +83,7 @@ def transcribe_segments(
     transcriber: Transcriber,
     request: TranscriptionRequest | None = None,
     config: TranscriptionConfig = TranscriptionConfig(),
-    cache=None, cancel=None, event_sink=None,
+    cancel=None, event_sink=None,
 ) -> TranscriptionResult:
     """调用已注入的后端，并在边界检查它返回的证据关联。"""
     effective_request = request or TranscriptionRequest()
@@ -106,42 +105,14 @@ def transcribe_segments(
     if not inputs:
         return TranscriptionResult(transcriber.info, ())
     from lazulite.events import checkpoint
-    identity=getattr(transcriber,'cache_identity',None) if cache is not None else None
-    identity=identity() if callable(identity) else identity
-    pcm=pcm_identity(audio) if cache is not None and identity is not None else None
     completed=0
     def generate(batch, request):
         nonlocal completed
-        # Preserve batch behavior without cache; with cache, each exact request is independent.
         checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
-        if cache is None or identity is None:
-            values=transcriber.transcribe(batch,request=request)
-            completed+=len(batch)
-            checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
-            return values
-        values=[]
-        for item in batch:
-            key=cache_key({'schema':'transcription-request-v2','pcm':pcm,'window':asdict(item.segment),
-                           'backend':identity,'request':asdict(request)})
-            entry=cache.get_json(key)
-            value=None
-            if entry is not None and entry.get('schema')=='transcription-request-v2':
-                try:
-                    value=transcription_segment_from_dict(entry['value'])
-                    target=value.backend_metadata.get('distribution_file')
-                    if target is not None:
-                        from pathlib import Path
-                        if not Path(target).is_file():value=None
-                except (ValueError,TypeError,KeyError):value=None
-            if value is None:
-                output=transcriber.transcribe((item,),request=request)
-                if len(output)!=1:raise ValueError('one result per request required')
-                value=_bind(item,output[0],request,request.context)
-                checkpoint(cancel)
-                cache.set_json(key,{'schema':'transcription-request-v2','value':asdict(value)})
-            values.append(value);completed+=1
-            checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
-        return tuple(values)
+        values=transcriber.transcribe(batch,request=request)
+        completed+=len(batch)
+        checkpoint(cancel,event_sink,'transcription',completed,len(inputs))
+        return values
     contextual = (
         transcriber.capabilities.context and not effective_request.include_timing
     )
@@ -168,3 +139,37 @@ def transcribe_segments(
         output=tuple(_bind(item,result,effective_request) for item,result in zip(inputs,output))
     from .timing import organize_timing
     return organize_timing(TranscriptionResult(backend=transcriber.info,segments=tuple(output)))
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionStage:
+    """A complete set of windows under one timing/context generation condition."""
+    segments: tuple[VocalSegment, ...]
+    request: TranscriptionRequest
+    config: TranscriptionConfig
+    capabilities: object
+    result: TranscriptionResult
+
+    def validate(self, audio):
+        expected = build_transcription_inputs(audio, self.segments,
+            maximum_seconds=self.capabilities.max_audio_seconds)
+        if len(expected) != len(self.result.segments):
+            raise ValueError("transcription stage missing request windows")
+        for item, result in zip(expected, self.result.segments):
+            result.__post_init__()
+            if result.request_window != item.segment or result.source_segment_id != item.segment.id:
+                raise ValueError("transcription window/parent mismatch")
+            if result.backend_metadata.get('request_timing') is not self.request.include_timing:
+                raise ValueError("transcription timing condition mismatch")
+            if 'request_context' not in result.backend_metadata:
+                raise ValueError("transcription actual context is required")
+
+
+def run_transcription_stage(audio, segments, *, transcriber, request=TranscriptionRequest(),
+                            config=TranscriptionConfig(), cancel=None, event_sink=None):
+    selected = tuple(s for s in segments if eligible_for_transcription(s))
+    result = transcribe_segments(audio, selected, transcriber=transcriber, request=request,
+                                config=config, cancel=cancel, event_sink=event_sink)
+    stage = TranscriptionStage(selected, request, config, transcriber.capabilities, result)
+    stage.validate(audio)
+    return stage

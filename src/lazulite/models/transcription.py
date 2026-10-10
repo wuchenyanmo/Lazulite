@@ -19,13 +19,12 @@ def _validate_time(value: float | None, field_name: str) -> None:
 class BackendInfo:
     name: str
     model_id: str
-    revision: str
     runtime_version: str
     precision: str
 
     def __post_init__(self) -> None:
         if not all(
-            (self.name, self.model_id, self.revision, self.runtime_version, self.precision)
+            (self.name, self.model_id, self.runtime_version, self.precision)
         ):
             raise ValueError("后端身份字段均不能为空")
 

@@ -18,7 +18,6 @@ from lazulite.transcription.token_scores import export_full_logprobs, extract_to
 class WhisperConfig:
     model_path: Path
     model_id: str
-    revision: str
     device: str = "cuda"
     precision: str = "float16"
     attention_implementation: str = "eager"
@@ -62,30 +61,8 @@ class WhisperBackend:
             from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
             self._model = AutoModelForSpeechSeq2Seq.from_pretrained(str(config.model_path), dtype=dtype, attn_implementation=config.attention_implementation).to(config.device).eval()
             self._processor = AutoProcessor.from_pretrained(str(config.model_path))
-        self.info = BackendInfo("whisper", config.model_id, config.revision, f"transformers {version('transformers')}; torch {torch.__version__}", config.precision)
+        self.info = BackendInfo("whisper", config.model_id, f"transformers {version('transformers')}; torch {torch.__version__}", config.precision)
         self._export_index = 0
-        self._content_identity = None
-
-    @property
-    def cache_identity(self) -> dict[str, object]:
-        """缓存只依赖可审计的模型身份和实际生成参数，不依赖目录路径。"""
-        config = asdict(self._config)
-        config["model_path"] = None
-        config["distribution_output_dir"] = str(self._config.distribution_output_dir) if self._config.distribution_output_dir else None
-        if self._content_identity is None:
-            import hashlib
-            names=['model.safetensors','config.json','generation_config.json','tokenizer.json',
-                   'tokenizer_config.json','vocab.json','merges.txt','preprocessor_config.json','added_tokens.json']
-            root=Path(self._config.model_path)
-            if not (root/'model.safetensors').is_file():
-                return None  # No trusted content inventory for alternate layouts yet.
-            identity={}
-            for name in names:
-                path=root/name
-                if path.is_file():
-                    with path.open('rb') as stream:identity[name]=hashlib.file_digest(stream,'sha256').hexdigest()
-            self._content_identity=identity
-        return {"backend": asdict(self.info), "config": config, "files":self._content_identity}
 
     def _waveform(self, item: TranscriptionInput) -> np.ndarray:
         if item.audio.sample_rate != 16_000:
@@ -151,7 +128,7 @@ class WhisperBackend:
         metadata = scores.metadata(); metadata.update({"generated_ids": ids, "prefix_length": prefix, "body_generation_steps": lexical_steps, "request_context": request.context})
         if self._config.distribution_output_dir is not None:
             target = self._config.distribution_output_dir / f"{item.segment.id}-{self._export_index}.npz"; self._export_index += 1
-            metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id, tokenizer_revision=self.info.revision))
+            metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id))
         timestamps = output.get("token_timestamps")
         eos = getattr(self._processor.tokenizer, 'eos_token_id', None)
         stop = 'eos' if eos is not None and eos in ids else 'max_new_tokens' if len(ids)>=self._config.max_new_tokens else 'unknown'

@@ -10,7 +10,7 @@ from lazulite.models.transcription import BackendInfo, TranscriptionResult, Tran
 
 def test_dp_alignment_keeps_unmatched_lines_and_uses_acoustic_core_without_model_time():
     analysis = VocalAnalysis("audio", (VocalSegment("s1", None, 1, 4, 1.5, 3.5, 1, 0),))
-    transcript = TranscriptionResult(BackendInfo("fake", "fake", "r", "v", "float32"), (TranscriptionSegment("s1", "夜空を見上げて", "ja", None, None, None, None, (), {}),))
+    transcript = TranscriptionResult(BackendInfo("fake", "fake", "v", "float32"), (TranscriptionSegment("s1", "夜空を見上げて", "ja", None, None, None, None, (), {}),))
     result = align_lines(LyricDocument((LyricLine("L1", "夜空を見上げて"), LyricLine("L2", "存在しない"))), transcript, analysis)
     assert result.lines[0].timing_source == "acoustic_core"
     assert result.lines[0].start == 1.5
@@ -20,7 +20,7 @@ def test_dp_alignment_keeps_unmatched_lines_and_uses_acoustic_core_without_model
 def test_offset_alignment_uses_core_start_without_missing_confidence_filter():
     analysis = VocalAnalysis("audio", (VocalSegment("s1", None, 11, 14, 11.5, 13.5, 1, 0), VocalSegment("s2", None, 21, 24, 21.5, 23.5, 1, 0)))
     document = LyricDocument((LyricLine("L1", "一", 1, 3), LyricLine("L2", "二", 11, 13)))
-    transcript = TranscriptionResult(BackendInfo("fake", "fake", "r", "v", "float32"), (TranscriptionSegment("s1", "一", "ja", None, None, None, None, (), {}), TranscriptionSegment("s2", "二", "ja", None, None, None, None, (), {})))
+    transcript = TranscriptionResult(BackendInfo("fake", "fake", "v", "float32"), (TranscriptionSegment("s1", "一", "ja", None, None, None, None, (), {}), TranscriptionSegment("s2", "二", "ja", None, None, None, None, (), {})))
     result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_anchors=2))
     assert result.offset_accepted
     assert result.lines[0].start == 11.5
@@ -29,7 +29,7 @@ def test_offset_alignment_uses_core_start_without_missing_confidence_filter():
 def test_dp_alignment_allows_bounded_multiple_lines_but_marks_coarse_time_as_interpolated():
     analysis = VocalAnalysis("audio", (VocalSegment("s1", None, 0, 4, 1, 3, 1, 0),))
     transcript = TranscriptionResult(
-        BackendInfo("fake", "fake", "r", "v", "float32"),
+        BackendInfo("fake", "fake", "v", "float32"),
         (TranscriptionSegment("s1", "一二", "ja", None, None, None, None, (), {}),),
     )
     result = align_lines(LyricDocument((LyricLine("L1", "一"), LyricLine("L2", "二"))), transcript, analysis)
@@ -51,7 +51,7 @@ def test_offset_alignment_uses_consistent_offsets_per_vocal_section():
         LyricLine("L3", "丙", 20), LyricLine("L4", "丁", 30),
     ))
     transcript = TranscriptionResult(
-        BackendInfo("fake", "fake", "r", "v", "float32"),
+        BackendInfo("fake", "fake", "v", "float32"),
         tuple(TranscriptionSegment(segment, text, "zh", None, None, None, None, (), {}) for segment, text in (("s1", "甲"), ("s2", "乙"), ("s3", "丙"), ("s4", "丁"))),
     )
     result = align_with_offset(document, transcript, analysis, config=OffsetAlignmentConfig(minimum_merged_section_chunks=2))
@@ -99,7 +99,7 @@ def test_window_end_completion_caps_rest_and_preserves_repeated_chorus():
         return TranscriptionSegment('s'+str(i),'repeat',None,None,None,None,None,
             (TimedText('repeat',onset,None,'word','model'),),{'raw_token_timestamps':[0,0]},
             RequestWindow(str(i),'s'+str(i),start,end,start,core_end))
-    info=BackendInfo('test','m','r','v','f32')
+    info=BackendInfo('test','m','v','f32')
     result=organize_timing(TranscriptionResult(info,(item(0,0,2,1.5,1),item(1,2,5,4,3))))
     assert result.segments[0].timed_text[0].end==1.5
     assert result.segments[0].timed_text[0].end_source=='acoustic_core'
@@ -123,7 +123,7 @@ def test_mixed_real_units_and_coarse_blocks_keep_boundary_provenance():
     from lazulite.models.audio import VocalSegment,VocalAnalysis
     from lazulite.models.transcription import BackendInfo,TranscriptionResult,TranscriptionSegment,TimedText
     from lazulite.alignment.line import align_lines
-    info=BackendInfo('test','m','r','v','f32')
+    info=BackendInfo('test','m','v','f32')
     a=VocalSegment('a',None,0,2,.5,1.5,None,None);b=VocalSegment('b',None,3,5,3.5,4.5,None,None)
     tr=TranscriptionResult(info,(
         TranscriptionSegment('a','first',None,None,None,None,None,(TimedText('first',.7,1.2,'word','model'),),{}),

@@ -13,14 +13,13 @@ from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.audio.activity import VocalConfig, main_vocal_audio
 from lazulite.audio.io import resample_audio
 from lazulite.audio.preparation import prepare_vocals, prepare_existing_vocals
-from lazulite.cache import FileCache, cache_key
 from lazulite.events import EventSink, ProgressEvent
 from lazulite.models.alignment import (
     AlignedLyricLine,
     AlignmentAnchor,
     LineAlignmentResult,
 )
-from lazulite.models.audio import AudioBuffer, PreparedVocals, VocalAnalysis, VocalSegment, pcm_identity
+from lazulite.models.audio import AudioBuffer, PreparedVocals, VocalAnalysis, VocalSegment
 from lazulite.models.lyrics import LyricDocument
 from lazulite.models.transcription import (
     BackendInfo,
@@ -31,20 +30,8 @@ from lazulite.models.transcription import (
     TranscriptionSegment,
 )
 from lazulite.transcription.base import Transcriber, TranscriptionRequest
-from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
+from lazulite.transcription.run import TranscriptionConfig, TranscriptionStage, run_transcription_stage, build_transcription_inputs
 from lazulite.transcription.evidence import eligible_for_transcription
-
-_CACHE_ALGORITHM_REVISION = "pipeline-result-v6-request-anchors"
-
-
-class Separator(Protocol):
-    def separate(self, audio: AudioBuffer) -> AudioBuffer: ...
-
-
-class CacheIdentity(Protocol):
-    @property
-    def cache_identity(self) -> Mapping[str, object] | None: ...
-
 
 @dataclass(frozen=True, slots=True)
 class PipelineConfig:
@@ -62,21 +49,20 @@ class PipelineResult:
     transcription: TranscriptionResult | None
     alignment: LineAlignmentResult
     execution: dict[str, object] = field(default_factory=dict)
+    transcriptions: dict[str, TranscriptionStage] = field(default_factory=dict)
 
 
 class AlignmentPipeline:
     def __init__(
         self,
         *,
-        transcriber: Transcriber,
-        separator: Separator | None = None,
-        cache: FileCache | None = None,
+        transcriber: Transcriber | None = None,
+        separator: object | None = None,
         event_sink: EventSink | None = None,
         cancel=None,
     ) -> None:
         self._transcriber = transcriber
         self._separator = separator
-        self._cache = cache
         self._event_sink = event_sink
         self._cancel = cancel
 
@@ -86,155 +72,26 @@ class AlignmentPipeline:
         if self._event_sink:
             self._event_sink(ProgressEvent(stage, kind, message=message))
 
-    @staticmethod
-    def _identity(resource: object) -> Mapping[str, object] | None:
-        value = getattr(resource, "cache_identity", None)
-        value = value() if callable(value) else value
-        return value if isinstance(value, Mapping) else None
-
-    def _cache_key(
-        self, audio: AudioBuffer, document: LyricDocument, config: PipelineConfig
-    ) -> str | None:
-        if self._cache is None or not audio.source_id.startswith("sha256:"):
-            return None
-        transcriber = self._identity(self._transcriber)
-        separator = (
-            self._identity(self._separator)
-            if self._separator is not None
-            else {"kind": "none"}
-        )
-        # 外部后端没有声明完整有效参数时宁可不缓存，也不跨模型错误复用。
-        if transcriber is None or separator is None:
-            return None
-        return cache_key(
-            {
-                "stage": "pipeline-result",
-                "algorithm_revision": _CACHE_ALGORITHM_REVISION,
-                "lazulite_version": __version__,
-                "audio": {
-                    "source_id": audio.source_id,
-                    "pcm_id": pcm_identity(audio),
-                    "sample_rate": audio.sample_rate,
-                    "shape": list(audio.samples.shape),
-                },
-                "document": asdict(document),
-                "pipeline_config": asdict(config),
-                "transcriber": transcriber,
-                "separator": separator,
-            }
-        )
-
-    @staticmethod
-    def _serialize(result: PipelineResult) -> dict[str, Any]:
-        return {"schema": _CACHE_ALGORITHM_REVISION, "result": asdict(result)}
-
-    @staticmethod
-    def _deserialize(payload: Mapping[str, Any]) -> PipelineResult | None:
-        if payload.get("schema") != _CACHE_ALGORITHM_REVISION or not isinstance(
-            payload.get("result"), Mapping
-        ):
-            return None
-        try:
-            result = payload["result"]
-            analysis_value = result["analysis"]
-            analysis = VocalAnalysis(
-                analysis_value["source_id"],
-                tuple(VocalSegment(**item) for item in analysis_value["segments"]),
-                tuple(analysis_value["diagnostics"]),
-                analysis_value["is_vocal"],
-                analysis_value["vocal_seconds"],
-            )
-            transcription_value = result["transcription"]
-            transcription = None
-            if transcription_value is not None:
-                backend = BackendInfo(**transcription_value["backend"])
-                transcription = TranscriptionResult(
-                    backend,
-                    tuple(
-                        TranscriptionSegment(
-                            source_segment_id=item["source_segment_id"],
-                            text=item["text"],
-                            language=item["language"],
-                            start=item["start"],
-                            end=item["end"],
-                            confidence=item["confidence"],
-                            confidence_kind=item["confidence_kind"],
-                            timed_text=tuple(
-                                TimedText(**{**unit, "generation_steps":tuple(unit["generation_steps"]), "probability":ProbabilitySummary(**unit["probability"]) if unit["probability"] is not None else None}) for unit in item["timed_text"]
-                            ),
-                            backend_metadata=item["backend_metadata"],
-                            request_window=RequestWindow(**item["request_window"]) if item["request_window"] is not None else None,
-                            probability=ProbabilitySummary(**item["probability"]) if item["probability"] is not None else None,
-                            issues=tuple(item["issues"]),
-                        )
-                        for item in transcription_value["segments"]
-                    ),
-                )
-            alignment_value = result["alignment"]
-            alignment = LineAlignmentResult(
-                tuple(
-                    AlignedLyricLine(
-                        **{
-                            **item,
-                            "source_segment_ids": tuple(item["source_segment_ids"]),
-                            "issues": tuple(item["issues"]),
-                            "source_request_ids":tuple(item["source_request_ids"]),
-                        }
-                    )
-                    for item in alignment_value["lines"]
-                ),
-                alignment_value["strategy"],
-                alignment_value["offset_accepted"],
-                tuple(AlignmentAnchor(**item) for item in alignment_value["anchors"]),
-                tuple(alignment_value["diagnostics"]),
-            )
-            return PipelineResult(
-                analysis, transcription, alignment, dict(result.get("execution", {}))
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            warnings.warn(f"缓存结果结构无效，忽略本次命中: {error}", RuntimeWarning)
-            return None
-
-    def _cache_result(self, key: str | None, result: PipelineResult) -> PipelineResult:
-        if key is not None and self._cache is not None:
-            self._cache.set_json(key, self._serialize(result))
-        return result
-
-    def _requires_full_distributions(self) -> bool:
-        identity = self._identity(self._transcriber)
-        config = None if identity is None else identity.get("config")
-        return isinstance(config, Mapping) and bool(
-            config.get("distribution_output_dir")
-        )
-
-    @staticmethod
-    def _distribution_files_exist(result: PipelineResult) -> bool:
-        if result.transcription is None:
-            return True
-        for segment in result.transcription.segments:
-            target = segment.backend_metadata.get("distribution_file")
-            if not isinstance(target, str) or not Path(target).is_file():
-                return False
-        return True
-
     def run(
         self,
         audio: AudioBuffer,
         document: LyricDocument,
         *,
         config: PipelineConfig = PipelineConfig(),
+        transcriptions: dict[str, TranscriptionStage] | None = None,
     ) -> PipelineResult:
         prepared = (
-            prepare_vocals(audio, separator=self._separator, config=config.vocal, cache=self._cache, cancel=self._cancel, event_sink=self._event_sink)
+            prepare_vocals(audio, separator=self._separator, config=config.vocal, cancel=self._cancel, event_sink=self._event_sink)
             if self._separator is not None else
             prepare_existing_vocals(audio, original_id=audio.source_id,
                                     original_duration=audio.duration, config=config.vocal)
         )
-        return self.run_prepared(prepared, document, config=config)
+        return self.run_prepared(prepared, document, config=config, transcriptions=transcriptions)
 
     def run_prepared(
         self, prepared: PreparedVocals, document: LyricDocument, *,
         config: PipelineConfig = PipelineConfig(),
+        transcriptions: dict[str, TranscriptionStage] | None = None,
     ) -> PipelineResult:
         from lazulite.events import checkpoint
         checkpoint(self._cancel)
@@ -246,37 +103,20 @@ class AlignmentPipeline:
         )
         if config.mode == "offset" and not has_complete_source_times:
             raise ValueError("offset 模式要求所有歌词行具有 source_start")
-        key = self._cache_key(audio, document, config)
-        if key is not None:
-            key = cache_key({"pipeline": key, "pcm": prepared.pcm_id,
-                             "analysis": asdict(prepared.analysis),
-                             "selection": [asdict(s) for s in prepared.segments],
-                             "source": prepared.segment_source,
-                             "preparation": prepared.analysis_identity,
-                             "separation": prepared.separation})
-        if key is not None and self._cache is not None:
-            cached = self._deserialize(self._cache.get_json(key) or {})
-            if cached is not None and (
-                not self._requires_full_distributions()
-                or self._distribution_files_exist(cached)
-            ):
-                self._emit("pipeline", "completed", "cache_hit")
-                return cached
         execution = {
-            "algorithm_revision": _CACHE_ALGORITHM_REVISION,
+            "algorithm": "line-request-anchors",
             "config": asdict(config),
             "audio_input": {
                 "sample_rate": audio.sample_rate,
                 "channels": audio.samples.shape[0],
             },
-            "vocal_reference": prepared.analysis_identity.get("reference"),
-            "prepared_pcm": prepared.pcm_id,
+            "vocal_reference": prepared.analysis_description.get("reference"),
             "asr_input": "mid_minus_absolute_side",
             "resampling": "ffmpeg-swr:filter_size=32:phase_shift=10:cutoff=0.97:zero_pad=64-output-samples:length=ceil",
             "requests": [],
         }
         self._emit("analysis", "started")
-        if not analysis.is_vocal or not analysis.segments:
+        if (prepared.segment_source == "automatic" and analysis.is_vocal is False) or not analysis.segments:
             # 无人声只是缺少自动化证据，不能丢失调用方传入的歌词行。
             unresolved = LineAlignmentResult(
                 tuple(
@@ -298,15 +138,23 @@ class AlignmentPipeline:
                 ("no_vocal_evidence",),
             )
             self._emit("analysis", "completed", "no_vocal_evidence")
-            return self._cache_result(
-                key, PipelineResult(analysis, None, unresolved, execution)
-            )
+            return PipelineResult(analysis, None, unresolved, execution)
         self._emit("analysis", "completed")
         self._emit("transcription", "started")
         asr_audio = resample_audio(
             main_vocal_audio(vocals), sample_rate=16_000, channels=1
         )
-        timing = self._transcriber.capabilities.timestamp_granularity != "none"
+        supplied = {} if transcriptions is None else dict(transcriptions)
+        if set(supplied) - {"preselected", "full"}:
+            raise ValueError("unknown transcription stage")
+        for stage in supplied.values():
+            stage.validate(asr_audio)
+        capabilities = self._transcriber.capabilities if self._transcriber is not None else next(
+            (stage.capabilities for stage in supplied.values()), None)
+        if capabilities is None:
+            raise ValueError("provide transcription stages or a transcriber")
+        timing = capabilities.timestamp_granularity != "none"
+        stages = {}
         all_segments = tuple(
             s for s in analysis.segments if eligible_for_transcription(s)
         )
@@ -319,7 +167,7 @@ class AlignmentPipeline:
                 run_config, lyric_hint="\n".join(line.text for line in document.lines)
             )
 
-        def transcribe(segments, include_timing):
+        def transcribe(name, segments, include_timing):
             execution["requests"].append(
                 {
                     "segments": [asdict(s) for s in segments],
@@ -327,49 +175,44 @@ class AlignmentPipeline:
                     "context_config": asdict(run_config),
                 }
             )
-            return transcribe_segments(
-                asr_audio,
-                segments,
-                transcriber=self._transcriber,
-                request=TranscriptionRequest(
-                    language=config.language, include_timing=include_timing
-                ),
-                config=run_config,
-                cache=self._cache, cancel=self._cancel, event_sink=self._event_sink,
-            )
+            request = TranscriptionRequest(language=config.language, include_timing=include_timing)
+            if name in supplied:
+                stage = supplied[name]
+                if (stage.segments != tuple(segments) or stage.request != request or
+                    stage.config != run_config or stage.capabilities != capabilities):
+                    raise ValueError(f"transcription stage {name} has different windows/context/timing conditions")
+            else:
+                if self._transcriber is None:
+                    raise ValueError(f"missing transcription stage: {name}")
+                prior = stages.get("preselected") if name == "full" and not include_timing and (
+                    not capabilities.context or run_config.prompt_mode == "none") else None
+                remaining = tuple(s for s in segments if prior is None or s.id not in {p.id for p in prior.segments})
+                stage = run_transcription_stage(asr_audio, remaining, transcriber=self._transcriber,
+                    request=request, config=run_config, cancel=self._cancel, event_sink=self._event_sink)
+                if prior is not None:
+                    rows={s.request_window.request_id:s for s in prior.result.segments+stage.result.segments}
+                    inputs=build_transcription_inputs(asr_audio,segments,maximum_seconds=capabilities.max_audio_seconds)
+                    result=TranscriptionResult(stage.result.backend,tuple(
+                        replace(rows[i.segment.request_id],request_window=i.segment) for i in inputs))
+                    stage=TranscriptionStage(tuple(segments),request,run_config,capabilities,result)
+                    stage.validate(asr_audio)
+            stages[name] = stage
+            return stage.result
 
         preselected = config.mode in {"offset", "auto"} and has_complete_source_times
         if preselected:
             selected = select_offset_segments(all_segments)
-            transcription = transcribe(selected, False)
+            transcription = transcribe("preselected", selected, False)
             offset = align_with_offset(
                 document, transcription, analysis, config=config.offset
             )
             if config.mode == "offset" or offset.offset_accepted:
                 self._emit("transcription", "completed")
                 self._emit("alignment", "completed")
-                return self._cache_result(
-                    key, PipelineResult(analysis, transcription, offset, execution)
-                )
-            # Timing/context changes require new generation. Stateless requests reuse exact windows.
-            if timing or (
-                self._transcriber.capabilities.context
-                and run_config.prompt_mode != "none"
-            ):
-                transcription = transcribe(all_segments, timing)
-            else:
-                reused = {s.id for s in selected}
-                additional = transcribe(
-                    tuple(s for s in all_segments if s.id not in reused), False
-                )
-                order = {s.id: i for i, s in enumerate(all_segments)}
-                combined = transcription.segments + additional.segments
-                transcription = TranscriptionResult(
-                    transcription.backend,
-                    tuple(sorted(combined, key=lambda s: (s.request_window.start,s.request_window.sequence) if s.request_window is not None else (analysis.segments[order[s.source_segment_id]].start,0))),
-                )
+                return PipelineResult(analysis, transcription, offset, execution, stages)
+            transcription = transcribe("full", all_segments, timing)
         else:
-            transcription = transcribe(all_segments, timing)
+            transcription = transcribe("full", all_segments, timing)
         self._emit("transcription", "completed")
         self._emit("alignment", "started")
         alignment = align_lines(document, transcription, analysis, config=config.line)
@@ -400,9 +243,7 @@ class AlignmentPipeline:
                 alignment, diagnostics=alignment.diagnostics + ("offset_fallback",)
             )
         self._emit("alignment", "completed")
-        return self._cache_result(
-            key, PipelineResult(analysis, transcription, alignment, execution)
-        )
+        return PipelineResult(analysis, transcription, alignment, execution, stages)
 
 
 def select_offset_segments(segments):

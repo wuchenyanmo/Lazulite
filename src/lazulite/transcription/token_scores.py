@@ -117,10 +117,9 @@ def export_full_logprobs(
     lexical_steps: Sequence[int],
     source_segment_id: str,
     model_id: str,
-    tokenizer_revision: str,
 ) -> Path:
     """显式保存可恢复的完整分布；常规 JSON 只保存该文件引用和摘要。"""
-    if not source_segment_id or not model_id or not tokenizer_revision:
+    if not source_segment_id or not model_id:
         raise ValueError("全分布导出必须记录分片、模型和 tokenizer 身份")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +131,5 @@ def export_full_logprobs(
         distribution_kind=np.asarray(summary.distribution_kind),
         source_segment_id=np.asarray(source_segment_id),
         model_id=np.asarray(model_id),
-        tokenizer_revision=np.asarray(tokenizer_revision),
     )
     return target

@@ -22,7 +22,6 @@ from lazulite.transcription.token_scores import export_full_logprobs, extract_to
 class QwenConfig:
     model_path: Path
     model_id: str
-    revision: str
     device_map: str = "cuda:0"
     precision: str = "bfloat16"
     attention_implementation: str = "sdpa"
@@ -57,19 +56,10 @@ class QwenBackend:
         self.info = BackendInfo(
             name="qwen-asr",
             model_id=config.model_id,
-            revision=config.revision,
             runtime_version=f"qwen-asr {version('qwen-asr')}; transformers {version('transformers')}; torch {torch.__version__}",
             precision=config.precision,
         )
         self._export_index = 0
-
-    @property
-    def cache_identity(self) -> dict[str, object]:
-        """缓存键排除路径，保留固定 revision 和影响 generate 的参数。"""
-        config = asdict(self._config)
-        config["model_path"] = None
-        config["distribution_output_dir"] = str(self._config.distribution_output_dir) if self._config.distribution_output_dir else None
-        return {"backend": asdict(self.info), "config": config}
 
     @staticmethod
     def _audio_for_input(item: TranscriptionInput) -> np.ndarray:
@@ -143,7 +133,7 @@ class QwenBackend:
         if self._config.distribution_output_dir is not None:
             target = self._config.distribution_output_dir / f"{item.segment.id}-{self._export_index}.npz"
             self._export_index += 1
-            metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id, tokenizer_revision=self.info.revision))
+            metadata["distribution_file"] = str(export_full_logprobs(target, scores, ids, lexical_steps=lexical_steps, source_segment_id=item.segment.id, model_id=self.info.model_id))
         return TranscriptionSegment(item.segment.id, text, detected_language, None, None, scores.confidence, "raw_token_geometric_mean" if scores.confidence is not None else None, (), metadata)
 
     def transcribe(self, inputs: Sequence[TranscriptionInput], *, request: TranscriptionRequest) -> tuple[TranscriptionSegment, ...]:

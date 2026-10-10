@@ -37,7 +37,7 @@ from lazulite.transcription.base import TranscriberCapabilities, TranscriptionRe
 from lazulite.transcription.evidence import quality, comparable_confidence
 from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
 
-INFO = BackendInfo("fixture", "fixture", "v1", "offline", "float32")
+INFO = BackendInfo("fixture", "fixture", "offline", "float32")
 
 
 def segment(i, start=0, end=10, section="A", presence=1):
@@ -507,21 +507,6 @@ def test_qq_search_requires_detail_duration_before_scoring():
     assert candidates[0].duration == 60 and candidates[0].match_score == 100
 
 
-def test_old_cache_schema_misses_and_context_config_changes_key(tmp_path):
-    from lazulite.cache import FileCache
-
-    class CachedBackend(Backend):
-        cache_identity = {"fixture": "v1"}
-
-    audio = AudioBuffer(np.zeros((1, 16000), np.float32), 16000, "sha256:a")
-    pipeline = AlignmentPipeline(transcriber=CachedBackend(), cache=FileCache(tmp_path))
-    doc = read_plain_text("hello")
-    assert pipeline._deserialize({"schema": "pipeline-result-v1", "result": {}}) is None
-    assert pipeline._cache_key(audio, doc, PipelineConfig()) != pipeline._cache_key(
-        audio,
-        doc,
-        PipelineConfig(transcription=TranscriptionConfig(prompt_mode="none")),
-    )
 
 
 @pytest.mark.parametrize("length", [1, 2, 10, 1001])
@@ -590,8 +575,7 @@ def test_cli_passes_actual_stereo_44100_to_separator(monkeypatch, tmp_path):
             audio=source,
             lyrics=tmp_path / "x.ttml",
             output=tmp_path / "result.json",
-            prepared=None,
-            cache=None,
+            vocals=None,
             evidence_policy="generic",
             separator_model="fixture",
             separator_device="cpu",
@@ -604,36 +588,6 @@ def test_cli_passes_actual_stereo_44100_to_separator(monkeypatch, tmp_path):
     assert not np.array_equal(received[0].samples[0], received[0].samples[1])
 
 
-def test_cache_round_trip_preserves_line_evidence_and_execution():
-    import json
-    from lazulite.models.alignment import AlignedLyricLine, LineAlignmentResult
-    from lazulite.pipeline import PipelineResult
-
-    result = PipelineResult(
-        VocalAnalysis("x", (), (), True, 8),
-        None,
-        LineAlignmentResult(
-            (
-                AlignedLyricLine(
-                    "1",
-                    1,
-                    None,
-                    1,
-                    1,
-                    "model_units",
-                    ("v1",),
-                    ("missing_end",),
-                    "hello",
-                ),
-            ),
-            "dp",
-            True,
-            (),
-        ),
-        {"requests": [{"segments": ["v1"], "include_timing": True}]},
-    )
-    payload = json.loads(json.dumps(AlignmentPipeline._serialize(result)))
-    assert AlignmentPipeline._deserialize(payload) == result
 
 
 def test_qq_missing_duration_does_not_become_zero_scored_success(monkeypatch):
