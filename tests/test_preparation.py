@@ -51,3 +51,12 @@ def test_external_file_import_preserves_native_rate_channels_and_pcm(tmp_path):
     audio=decode_native_audio(p)
     assert audio.sample_rate==22050 and audio.samples.shape==(1,22050)
     np.testing.assert_array_equal(audio.samples[0],samples)
+
+
+def test_manual_segments_do_not_trigger_automatic_analysis(monkeypatch):
+    audio,analysis=fixture()
+    def fail(*args,**kwargs): raise AssertionError('manual input does not request analysis')
+    monkeypatch.setattr(__import__('lazulite.audio.preparation',fromlist=['analyze_vocals']),'analyze_vocals',fail)
+    result=prepare_existing_vocals(audio,segments=analysis.segments)
+    assert result.analysis.is_vocal is None and result.analysis.segments==()
+    assert result.segments==analysis.segments and result.segment_source=='manual'

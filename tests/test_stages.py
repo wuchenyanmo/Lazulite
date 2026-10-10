@@ -80,3 +80,13 @@ def test_lightweight_model_probe_accepts_modified_config_without_torch(tmp_path)
     (tmp_path/'model.safetensors').write_bytes(b'structure probe does not read model bytes')
     vocab,blank,columns,frames,normalize=inspect_model(tmp_path)
     assert (vocab['a'],blank,columns,frames.sample_rate,frames.stride_samples,frames.receptive_samples,normalize)==(4,2,5,8000,6,5,False)
+
+
+def test_original_duration_allows_only_resampling_ceiling_sample():
+    audio=AudioBuffer(np.ones((1,44101),np.float32)*.1,44100,'v')
+    segment=VocalSegment('s',None,0,audio.duration,0,audio.duration,None,None)
+    p=prepare_existing_vocals(audio,segments=(segment,))
+    a=compute_acoustics(p,backend=Backend())
+    assert a.mapping.pieces[-1].source_end/a.mapping.sample_rate > audio.duration
+    assert a.mapping.pieces[-1].source_end/a.mapping.sample_rate-audio.duration < 1/a.mapping.sample_rate
+    with pytest.raises(ValueError): replace(a,original_duration=audio.duration-.001)

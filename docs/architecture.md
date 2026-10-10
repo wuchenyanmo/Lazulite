@@ -17,7 +17,7 @@ Lazulite 计算并返回候选。Python 3.12+；原轴时间为绝对秒，音�
 
 `prepare_vocals(original, separator=...)` 分离后使用原曲参考分析；`prepare_existing_vocals(vocals, analysis=..., segments=...)` 消费完整人声和可选分析。时长默认来自音频，原轴零点固定为 0，业务来源 ID 可选。
 
-`PreparedVocals` 保存波形、采样率、完整原轴时长、分析和选定片段。显式分析检查音频关联和范围。显式 `segments` 为人工选择；`None` 表示采用自动分析，空元组表示人工选择为空。自动明确无人声、未知自动判定和人工片段分别处理。波形不复制，调用方负责输入在计算期间保持不变。
+`PreparedVocals` 保存波形、采样率、完整原轴时长、分析和选定片段。显式分析检查音频关联和范围。显式 `segments` 为人工选择，未提供分析时不触发自动分析；`None` 表示采用自动分析，空元组表示人工选择为空。自动明确无人声、未知自动判定和人工片段分别处理。波形不复制，调用方负责输入在计算期间保持不变。
 
 ## 日语阶段
 
@@ -26,7 +26,7 @@ Lazulite 计算并返回候选。Python 3.12+；原轴时间为绝对秒，音�
 - `[frames, columns]` 归一化自然对数概率；允许负无穷表示零概率，拒绝 NaN、正无穷和错误归一化。
 - token 到列的映射、blank ID 和特殊 token。
 - `FrameMap(sample_rate, stride_samples, receptive_samples, offset_samples)`；边界 `i` 的秒数是 `(offset + i × stride) / rate`。帧区间 `[a,b)` 转换为两个边界。
-- `ConcatMap(sample_rate, sample_count, pieces)` 和原轴总时长；原轴、拼接轴区间均使用该采样率下的整数样本。
+- `ConcatMap(sample_rate, sample_count, pieces)` 和原轴总时长；原轴、拼接轴区间均使用该采样率下的整数样本。重采样向上取整允许末端最多一个目标采样点的余量。
 - 可选逐帧 rest 和实际运行描述。
 
 `decode_japanese(acoustic, request, config=..., prepared=None, encoder=None)` 执行目标编码、首遍 CTC 与可选提示辅助第二遍。休止代价需声学结果中的活动；缺少时可提供完整人声计算。传入波形时必须匹配声学坐标。只消费概率与活动不需要模型或原曲。

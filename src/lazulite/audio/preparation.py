@@ -15,6 +15,9 @@ def prepare_existing_vocals(vocals: AudioBuffer, *, original_id: str | None = No
     duration = vocals.duration if original_duration is None else original_duration
     if reference is not None and abs(reference.duration - duration) > 1 / reference.sample_rate:
         raise ValueError("reference does not match complete duration")
+    if analysis is None and segments is not None:
+        analysis = VocalAnalysis(vocals.source_id, (), is_vocal=None)
+        analysis_description = {"kind": "manual_segments", "reference": "not_computed"}
     external = analysis is not None
     analysis = analysis if external else analyze_vocals(vocals, config=config, reference=reference)
     description = (analysis_description or {"kind": "external"}) if external else {

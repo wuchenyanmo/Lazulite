@@ -58,7 +58,7 @@ class AcousticResult:
             raise ValueError('rows must be normalized log probabilities')
         if self.frames.sample_rate != self.mapping.sample_rate or (len(lp) and self.frames.time(len(lp)) > self.mapping.duration+1e-8):
             raise ValueError('frame mapping outside concatenated audio')
-        if not isfinite(self.original_duration) or self.original_duration < 0 or any(p.source_end/self.mapping.sample_rate > self.original_duration+1e-8 for p in self.mapping.pieces):
+        if not isfinite(self.original_duration) or self.original_duration < 0 or any(p.source_end/self.mapping.sample_rate > self.original_duration+1/self.mapping.sample_rate+1e-8 for p in self.mapping.pieces):
             raise ValueError('pieces outside original duration')
         if self.rest is not None and (self.rest.shape != (len(lp),) or not np.isfinite(self.rest).all() or np.any((self.rest<0)|(self.rest>1))):
             raise ValueError('rest must contain one finite 0–1 value per frame')
@@ -93,7 +93,7 @@ class DecodeResult:
             self.frames.sample_rate != self.mapping.sample_rate or
             self.frame_count and self.frames.time(self.frame_count)>self.mapping.duration+1e-8 or
             not isfinite(self.original_duration) or self.original_duration<0 or
-            any(p.source_end/self.mapping.sample_rate>self.original_duration+1e-8 for p in self.mapping.pieces)):
+            any(p.source_end/self.mapping.sample_rate>self.original_duration+1/self.mapping.sample_rate+1e-8 for p in self.mapping.pieces)):
             raise ValueError('invalid decoded coordinates')
         if (type(self.blank_id) is not int or not 0<=self.blank_id<self.vocabulary_size or
             any(type(v) is not int or not 0<=v<self.vocabulary_size for v in self.vocabulary.values()) or
