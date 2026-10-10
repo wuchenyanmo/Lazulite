@@ -1,4 +1,0 @@
-ninja
-psutil
-packaging
-flash_attn
