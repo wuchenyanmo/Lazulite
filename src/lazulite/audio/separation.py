@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from lazulite.models.audio import AudioBuffer
 
@@ -20,6 +21,7 @@ class DemucsConfig:
     transition_power: float = 1.0
     num_workers: int = 0
     segment: float | None = None
+    model_repo: str | None = None
 
     def __post_init__(self) -> None:
         if self.transition_power < 1 or self.num_workers < 0 or self.segment is not None and self.segment <= 0:
@@ -46,7 +48,29 @@ class DemucsSeparator:
         # Weight construction must not consume the caller's CPU RNG stream.
         from lazulite._runtime import preserve_random_state
         with preserve_random_state(torch):
-            self._model = get_model(self._config.model_name).to(self._config.device).eval()
+            if self._config.model_repo is None:
+                model = get_model(self._config.model_name)
+            else:
+                repo = Path(self._config.model_repo)
+                if self._config.model_name != 'htdemucs':
+                    raise ValueError('本地模型仓库目前只支持 htdemucs')
+                for name in ('htdemucs.yaml', '955717e8-8726e21a.th'):
+                    if not (repo / name).is_file():
+                        raise FileNotFoundError(f'包内 Demucs 模型缺失：{name}；请恢复完整模型组件')
+                # Demucs 4 serializes a constructor and NumPy scalars. Permit only
+                # this fixed model's types, retaining weights_only=True. Never
+                # change torch.load globally or enable arbitrary pickle loading.
+                from contextlib import nullcontext
+                from fractions import Fraction
+                import numpy as np
+                from numpy._core.multiarray import scalar
+                from demucs.htdemucs import HTDemucs
+                allowed = [HTDemucs, Fraction, np.dtype, np.dtypes.Float64DType,
+                           (scalar, 'numpy.core.multiarray.scalar')]
+                context = torch.serialization.safe_globals(allowed) if hasattr(torch.serialization, 'safe_globals') else nullcontext()
+                with context:
+                    model = get_model(self._config.model_name, repo=repo)
+            self._model = model.to(self._config.device).eval()
         return self._model
 
     @property
