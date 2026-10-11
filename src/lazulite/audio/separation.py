@@ -52,13 +52,10 @@ class DemucsSeparator:
                 model = get_model(self._config.model_name)
             else:
                 repo = Path(self._config.model_repo)
-                if self._config.model_name != 'htdemucs':
-                    raise ValueError('本地模型仓库目前只支持 htdemucs')
-                for name in ('htdemucs.yaml', '955717e8-8726e21a.th'):
-                    if not (repo / name).is_file():
-                        raise FileNotFoundError(f'包内 Demucs 模型缺失：{name}；请恢复完整模型组件')
+                if not repo.is_dir():
+                    raise FileNotFoundError(f'Demucs 本地模型仓库不存在或不是目录：{repo}')
                 # Demucs 4 serializes a constructor and NumPy scalars. Permit only
-                # this fixed model's types, retaining weights_only=True. Never
+                # supported deserialization types, retaining weights_only=True. Never
                 # change torch.load globally or enable arbitrary pickle loading.
                 from contextlib import nullcontext
                 from fractions import Fraction
