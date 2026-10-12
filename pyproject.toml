@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lazulite"
-version = "0.3.0"
+version = "0.3.1"
 description = "独立人声准备、行级证据与日语全局词级对齐引擎"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Lazulite contributors" }]
 dependencies = [
-    "fuzzywuzzy>=0.18,<1",
+    "rapidfuzz>=3.14.6,<4",
     "mutagen>=1.47",
     "numpy>=2.0",
     "scipy>=1.17,<2",
