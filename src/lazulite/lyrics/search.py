@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from functools import cache
 
-from fuzzywuzzy import fuzz
+from rapidfuzz import fuzz
 from opencc import OpenCC
 
 from .normalize import SEARCH_SPECIAL_CHAR_REPLACEMENTS, normalize_text

@@ -12,7 +12,7 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Lazulite contributors" }]
 dependencies = [
-    "fuzzywuzzy>=0.18,<1",
+    "rapidfuzz>=3.14.6,<4",
     "mutagen>=1.47",
     "numpy>=2.0",
     "scipy>=1.17,<2",
