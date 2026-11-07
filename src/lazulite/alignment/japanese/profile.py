@@ -26,14 +26,10 @@ string per unit so token positions map back to units.
   calls the profile once per lyric line, so a line-final っ is empty and a
   line-initial ー has nothing to hold (both reported as ``unaligned``), never
   borrowed from the next / previous line.
-* ``en`` units: lowercase letters (apostrophes dropped).
-* ``zh`` units: tone-less pinyin letters, ü written as ``v``.
 """
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Sequence
 
 from .kana import split_morae, to_hiragana
@@ -123,14 +119,6 @@ def _geminate(next_text: str) -> str:
     return next_text[0]
 
 
-_LETTERS_RE = re.compile(r"[a-z]+")
-
-
-def _letters(s: str) -> str:
-    s = unicodedata.normalize("NFKC", s).lower().replace("ü", "v")
-    return "".join(_LETTERS_RE.findall(s))
-
-
 class JaHepburnProfile:
     name = "ja-hepburn"
     version = "ja-hepburn/2"
@@ -139,9 +127,7 @@ class JaHepburnProfile:
         n = len(readings)
         base: list[str] = []
         for r, lang, fl in zip(readings, langs, flags):
-            if lang in ("en", "zh", "other") and not _looks_kana(r):
-                base.append(_letters(r))
-            elif "sokuon" in fl or to_hiragana(r) == "っ":
+            if "sokuon" in fl or to_hiragana(r) == "っ":
                 base.append("\0sokuon")
             elif is_hold(r):
                 base.append("")  # held: time from the unit before it, no tokens of its own
@@ -154,11 +140,4 @@ class JaHepburnProfile:
                 nxt = out[i + 1] if i + 1 < n and out[i + 1] and out[i + 1][0] != "\0" else ""
                 out[i] = _geminate(nxt)
         return out
-
-
-def _looks_kana(s: str) -> bool:
-    from .kana import is_kana_text
-
-    return is_kana_text(s)
-
 

@@ -37,3 +37,9 @@ def test_tone_stripping_does_not_treat_script_boundaries_as_whitespace():
     p=prepare_input(req,MMS_VOCAB,0,options=InputOptions(True,True))
     assert list(p['texts'].values())==['nei5','ka']
     assert model_texts(['nei5か'],InputOptions(True,True))==['nei5ka']
+
+
+def test_other_architectures_are_not_supported_models(tmp_path):
+ from lazulite.alignment.japanese.backend import UnsupportedModel
+ (tmp_path/'config.json').write_text('{"model_type":"bert"}')
+ with pytest.raises(UnsupportedModel):describe_model(tmp_path)

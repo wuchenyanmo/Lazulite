@@ -8,8 +8,7 @@ from lazulite.models.japanese import (
 )
 from .stages import AcousticResult, DecodeResult
 from .ctc import decode, NoFeasiblePath, DEFAULT_MEMORY, VERSION as CTC_VERSION
-from .profile import JaHepburnProfile, is_hold
-from .kana import is_kana_text
+from .profile import is_hold
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +32,7 @@ class JapaneseConfig:
 from .input import profile_request as _profile, InputOptions, VERSION as INPUT_VERSION
 
 
-def _intervals(request, spans, ranges, frames):
+def _intervals(request, spans, ranges, frames, derive=True):
     raw = {}
     sources = {}
     for line in request.lines:
@@ -44,7 +43,7 @@ def _intervals(request, spans, ranges, frames):
         i=0
         while i<len(rows):
             j=i+1
-            while j<len(rows) and is_hold(line.units[j].reading) and line.units[j].reading_language=='ja' and rows[j] is None:
+            while derive and j<len(rows) and is_hold(line.units[j].reading) and line.units[j].reading_language=='ja' and rows[j] is None:
                 j+=1
             if j>i+1 and rows[i] is not None and line.units[i].reading_language=='ja' and not is_hold(line.units[i].reading):
                 a,b=rows[i]
@@ -63,8 +62,8 @@ def _intervals(request, spans, ranges, frames):
     return raw,sources
 
 
-def _units(request,texts,ranges,problems,spans,concat,frames):
-    intervals,sources=_intervals(request,spans,ranges,frames)
+def _units(request,texts,ranges,problems,spans,concat,frames,derive=True):
+    intervals,sources=_intervals(request,spans,ranges,frames,derive)
     units=[]
     for line in request.lines:
         for u in line.units:
@@ -142,9 +141,6 @@ def compute_acoustics(prepared: PreparedVocals, *, backend, include_activity=Fal
 def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest, *,
                     config=JapaneseConfig(), prepared=None, encoder=None, cancel=None, event_sink=None):
     request.__post_init__()
-    from dataclasses import replace
-    if not config.latin_normalize:
-        request = replace(request, lines=tuple(replace(l, units=tuple(replace(u, reading_language='unknown') for u in l.units)) for l in request.lines))
     acoustic.__post_init__()
     checkpoint(cancel,event_sink,'decode')
     texts,tokens,ranges,problems=_profile(request,acoustic.vocabulary,acoustic.blank_id,acoustic.special_tokens,encoder,InputOptions(config.latin_normalize, config.strip_tone_digits))
@@ -185,7 +181,7 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
     if spans is not None and config.hint_mode=='auto':
         from .calibration import calibrate
         checkpoint(cancel,event_sink,'calibration')
-        units=_units(request,texts,ranges,problems,spans,concat,frames)
+        units=_units(request,texts,ranges,problems,spans,concat,frames,config.latin_normalize)
         anchors,calibration=calibrate(request,units,ranges,concat,frames)
         calibration['mode']='auto'
         if anchors:
@@ -209,10 +205,14 @@ def finalize_japanese(decoded: DecodeResult, *, completion=True, cancel=None,eve
         units=tuple(JapaneseUnitResult(u.unit_id,l.line_id,u.reading,decoded.texts[u.unit_id],Timing(),Timing(),
             issues=(JapaneseIssue(u.unit_id,decoded.reason),)) for l in request.lines for u in l.units)
     else:
-        units=_units(request,decoded.texts,decoded.ranges,decoded.problems,decoded.spans,decoded.mapping,decoded.frames)
+        units=_units(request,decoded.texts,decoded.ranges,decoded.problems,decoded.spans,decoded.mapping,decoded.frames,decoded.execution['config']['latin_normalize'])
         if completion:
             from .completion import complete_units, VERSION as COMPLETION_VERSION
-            units=complete_units(request,units,decoded.mapping,decoded.original_duration)
+            completion_request=request
+            if not decoded.execution['config']['latin_normalize']:
+                from dataclasses import replace
+                completion_request=replace(request, lines=tuple(replace(l, units=tuple(replace(u,reading_language='unknown') for u in l.units)) for l in request.lines))
+            units=complete_units(completion_request,units,decoded.mapping,decoded.original_duration)
             execution['completion']=COMPLETION_VERSION
     issues=[JapaneseIssue('request','partial_targets')] if any(v!='profile_hold' for v in decoded.problems.values()) else []
     checkpoint(cancel)

@@ -7,12 +7,16 @@ from lazulite.events import checkpoint
 from .stages import FrameMap
 
 
+class UnsupportedModel(ValueError):
+    """Directory is not one of the supported acoustic formats."""
+
+
 def inspect_hf_model(path):
     """Read small configuration files only; never instantiate or hash weights."""
     path = Path(path)
     config = json.loads((path/'config.json').read_text())
     if config.get('model_type') != 'wav2vec2' or config.get('add_adapter', False):
-        raise ValueError('this adapter requires Wav2Vec2 CTC without output adapters')
+        raise UnsupportedModel('this adapter requires Wav2Vec2 CTC without output adapters')
     processor = path/'preprocessor_config.json'
     pre = json.loads(processor.read_text()) if processor.is_file() else json.loads((path/'processor_config.json').read_text())['feature_extractor']
     vocab = json.loads((path/'vocab.json').read_text())
@@ -133,7 +137,7 @@ def describe_model(path):
     if declaration.is_file():
         value = json.loads(declaration.read_text(encoding='utf-8'))
         if value.get('type') != 'torchaudio-mms-fa':
-            raise ValueError('unsupported alignment model type')
+            raise UnsupportedModel('unsupported alignment model type')
         weights = contained_file(path, value.get('weights'))
         return {'type': 'torchaudio-mms-fa', 'vocabulary': MMS_VOCAB.copy(), 'blank': 0,
                 'columns': 28, 'frames': FrameMap(16000, 320, 400), 'normalize': True,
