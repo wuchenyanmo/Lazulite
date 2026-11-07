@@ -72,22 +72,28 @@ def split_request(request, options=InputOptions()):
                 uid = unit.unit_id if len(pieces) == 1 else f'{unit.unit_id}/piece/{i}'
                 origins[uid] = unit.unit_id
                 units.append(replace(unit, unit_id=uid, reading=text, reading_language='ja' if kana else 'unknown',
-                                     reading_range=(a,b) if b>a else None))
+                                     reading_range=(a,b) if b>a else None, input_group=unit.input_group or unit.unit_id,
+                                     source_range=(unit.source_range[0]+a,unit.source_range[0]+b) if unit.reading_source=='body' and b>a and unit.source_range[1]-unit.source_range[0]==len(unit.reading) else unit.source_range))
         lines.append(replace(line, units=tuple(units)))
     return replace(request, lines=tuple(lines)), origins
 
 
-def model_texts(readings, options=InputOptions()):
+def model_texts(readings, options=InputOptions(), groups=None):
     pieces = [reading_pieces(r, options) for r in readings]
     flat = [p for group in pieces for p in group]
     kana_values = JaHepburnProfile().unit_texts([p[0] if p[3] else '' for p in flat], ['ja']*len(flat), [[] for _ in flat])
+    group_ids = [group for group, pieces_for_unit in zip(groups if groups is not None else range(len(readings)), pieces) for _ in pieces_for_unit]
     values = []
     for p, kana_text in zip(flat, kana_values):
         value = kana_text if p[3] else romanizer().romanize_string(p[0]) if options.latin_normalize and p[0] else p[0]
+        values.append(value)
+    for i, value in enumerate(values):
         if options.strip_tone_digits:
-            value = re.sub(r'\d+(?=\s|$)', '', value)
+            following = next((values[j] for j in range(i+1,len(values)) if group_ids[j]==group_ids[i] and values[j]), '')
+            pattern = r'\d+(?=\s|$)' if not following or following[0].isspace() else r'\d+(?=\s)'
+            value = re.sub(pattern, '', value)
         # Whitespace is a separator; punctuation/diacritics are checked, never silently erased.
-        values.append(''.join(value.lower().split()))
+        values[i] = ''.join(value.lower().split())
     out, offset = [], 0
     for group in pieces:
         out.append(''.join(values[offset:offset+len(group)])); offset += len(group)
@@ -97,7 +103,7 @@ def model_texts(readings, options=InputOptions()):
 def profile_request(request, vocabulary, blank, special_tokens=(), encoder=None, options=InputOptions()):
     texts, tokens, ranges, problems = {}, [], {}, {}
     for line in request.lines:
-        values = model_texts([u.reading for u in line.units], options)
+        values = model_texts([u.reading for u in line.units], options, [u.input_group or u.unit_id for u in line.units])
         for u, text in zip(line.units, values):
             texts[u.unit_id] = text
             begin = len(tokens)

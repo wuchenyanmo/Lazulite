@@ -30,3 +30,10 @@ def test_mixed_input_mapping_and_unknowns():
     assert prepared['texts']=={'u/piece/0':'ga','u/piece/1':'nei214!'}
     assert prepared['unknown_characters']['u/piece/1']==['!','1','2','4']
     assert model_texts(['nei214 hou55'],InputOptions(False,True))==['neihou']
+
+
+def test_tone_stripping_does_not_treat_script_boundaries_as_whitespace():
+    req=JapaneseAlignmentRequest((JapaneseLine('l','字',(JapaneseUnit('u',(0,1),'nei5か','unknown','ruby'),)),))
+    p=prepare_input(req,MMS_VOCAB,0,options=InputOptions(True,True))
+    assert list(p['texts'].values())==['nei5','ka']
+    assert model_texts(['nei5か'],InputOptions(True,True))==['nei5ka']

@@ -22,6 +22,7 @@ class JapaneseUnit:
     reading_language: str
     reading_source: str
     reading_range: tuple[int, int] | None = None
+    input_group: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
