@@ -13,6 +13,7 @@ license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Lazulite contributors" }]
 dependencies = [
     "rapidfuzz>=3.14.6,<4",
+    "uroman==1.3.1.1",
     "mutagen>=1.47",
     "numpy>=2.0",
     "scipy>=1.17,<2",
@@ -25,7 +26,6 @@ japanese = [
     "torch>=2.6",
     "transformers==4.57.6",
     "torchaudio>=2.6,<2.12",
-    "uroman==1.3.1.1",
 ]
 
 whisper = [
