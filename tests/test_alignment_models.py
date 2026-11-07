@@ -43,3 +43,22 @@ def test_other_architectures_are_not_supported_models(tmp_path):
  from lazulite.alignment.japanese.backend import UnsupportedModel
  (tmp_path/'config.json').write_text('{"model_type":"bert"}')
  with pytest.raises(UnsupportedModel):describe_model(tmp_path)
+
+
+@pytest.mark.parametrize('contents',['[]','null','42'])
+def test_malformed_small_configuration_is_a_structure_error(tmp_path,contents):
+ (tmp_path/'alignment-model.json').write_text(contents)
+ with pytest.raises(ValueError,match='JSON object'):describe_model(tmp_path)
+
+
+def test_hf_shards_must_exist_inside_model_directory(tmp_path):
+ (tmp_path/'config.json').write_text(json.dumps({'model_type':'wav2vec2','conv_kernel':[3],'conv_stride':[2],'pad_token_id':0,'vocab_size':2}))
+ (tmp_path/'preprocessor_config.json').write_text(json.dumps({'feature_size':1,'sampling_rate':16000,'do_normalize':True}))
+ (tmp_path/'vocab.json').write_text('{"[PAD]":0,"a":1}')
+ index=tmp_path/'model.safetensors.index.json'
+ index.write_text('{"weight_map":{"encoder":"part.safetensors"}}')
+ with pytest.raises(ValueError,match='missing'):describe_model(tmp_path)
+ (tmp_path/'part.safetensors').write_bytes(b'opaque')
+ assert (tmp_path/'part.safetensors') in describe_model(tmp_path)['files']
+ index.write_text('{"weight_map":[]}')
+ with pytest.raises(ValueError,match='index'):describe_model(tmp_path)

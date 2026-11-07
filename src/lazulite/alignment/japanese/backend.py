@@ -7,6 +7,20 @@ from lazulite.events import checkpoint
 from .stages import FrameMap
 
 
+def _object_file(path):
+    value = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict):
+        raise ValueError(f'{path.name} must contain a JSON object')
+    return value
+
+
+def _shards(path):
+    mapping = _object_file(path).get('weight_map')
+    if not isinstance(mapping, dict) or not mapping or any(not isinstance(v,str) for v in mapping.values()):
+        raise ValueError('invalid sharded weight index')
+    return set(mapping.values())
+
+
 class UnsupportedModel(ValueError):
     """Directory is not one of the supported acoustic formats."""
 
@@ -14,14 +28,15 @@ class UnsupportedModel(ValueError):
 def inspect_hf_model(path):
     """Read small configuration files only; never instantiate or hash weights."""
     path = Path(path)
-    config = json.loads((path/'config.json').read_text())
+    config = _object_file(path/'config.json')
     if config.get('model_type') != 'wav2vec2' or config.get('add_adapter', False):
         raise UnsupportedModel('this adapter requires Wav2Vec2 CTC without output adapters')
     processor = path/'preprocessor_config.json'
-    pre = json.loads(processor.read_text()) if processor.is_file() else json.loads((path/'processor_config.json').read_text())['feature_extractor']
-    vocab = json.loads((path/'vocab.json').read_text())
+    pre = _object_file(processor) if processor.is_file() else _object_file(path/'processor_config.json')['feature_extractor']
+    if not isinstance(pre, dict): raise ValueError('feature extractor must be an object')
+    vocab = _object_file(path/'vocab.json')
     added = path/'added_tokens.json'
-    if added.is_file(): vocab.update(json.loads(added.read_text()))
+    if added.is_file(): vocab.update(_object_file(added))
     stride, receptive = 1, 1
     kernels, strides = config['conv_kernel'], config['conv_stride']
     if not kernels or len(kernels) != len(strides) or any(type(v) is not int or v<=0 for v in kernels+strides):
@@ -39,8 +54,7 @@ def inspect_hf_model(path):
         raise ValueError('explicit mono feature extractor configuration required')
     for name in ('model.safetensors.index.json', 'pytorch_model.bin.index.json'):
         if (path/name).is_file():
-            index = json.loads((path/name).read_text())
-            for shard in set(index['weight_map'].values()):
+            for shard in _shards(path/name):
                 contained_file(path, shard)
     return vocab, blank, columns, frames, pre['do_normalize']
 
@@ -135,7 +149,7 @@ def describe_model(path):
     path = Path(path).resolve()
     declaration = path / 'alignment-model.json'
     if declaration.is_file():
-        value = json.loads(declaration.read_text(encoding='utf-8'))
+        value = _object_file(declaration)
         if value.get('type') != 'torchaudio-mms-fa':
             raise UnsupportedModel('unsupported alignment model type')
         weights = contained_file(path, value.get('weights'))
@@ -149,7 +163,7 @@ def describe_model(path):
     files = [path/name for name in names if (path/name).is_file()]
     for file in tuple(files):
         if file.name.endswith('.index.json'):
-            files.extend(contained_file(path, name) for name in set(json.loads(file.read_text())['weight_map'].values()))
+            files.extend(contained_file(path, name) for name in _shards(file))
     return {'type': 'wav2vec2-ctc', 'vocabulary': vocab, 'blank': blank, 'columns': columns,
             'frames': frames, 'normalize': normalize, 'files': tuple(files)}
 
