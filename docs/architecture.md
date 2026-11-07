@@ -58,3 +58,10 @@ Lazulite 计算并返回候选。Python 3.12+；原轴时间为绝对秒，音�
 `exchange` 只读写指定的声学 NPZ、解码 JSON 和转写阶段 JSON；读取验证当前结构，不访问模型。大矩阵只由声学阶段或显式文件输出取得，普通最终结果不携带矩阵。
 
 计算层不选择持久化位置，不自动发现或保存历史结果。调用方决定某份结果是否适用于本次输入和模型。后端 `close()` 释放实例资源；取消抛出 `Cancelled`，不返回最终成功结果。CTC 额外内存预算默认 512 MiB，实际所需空间超限即失败。
+
+
+### 本地对齐模型与输入准备
+
+`alignment.japanese.backend.describe_model` 只检查单个目录的小配置及权重文件存在性，返回词表、blank、帧配置和所需文件。`open_backend` 支持 HF Wav2Vec2 CTC 与 TorchAudio MMS_FA；后者使用 `alignment-model.json` 声明 `{"type":"torchaudio-mms-fa","weights":"model.pt"}`，严格加载原始 31 行输出头并选择 28 行。两者共用全局一次波形标准化、20 秒核心与左右 2 秒上下文、CTC 和原轴回映。MMS_FA 在既有日语样本中存在尾点偏早限制。
+
+`alignment.japanese.input.prepare_input` 接收带稳定 ID 的请求、模型词表及 `InputOptions`，返回内部音拍/脚本片段、原单元映射、模型文本、编码范围与问题。`latin_normalize` 默认开启，假名沿用行内上下文，其余文本由 uroman 1.3.1.1 处理；`strip_tone_digits` 默认关闭，开启后删除每个空白分隔片段末尾连续数字。关闭归一化时保留附标和原字形，由词表判断。预览与执行共用 `profile_request`；日语长音派生只在归一化开启且前驱符合日语条件时生效。模型目录生命周期和编辑对象投影由调用方管理。
