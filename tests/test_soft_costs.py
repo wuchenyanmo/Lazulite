@@ -123,3 +123,23 @@ def test_punctuation_pieces_preserve_sokuon_and_unknown():
     assert reading_pieces('、。') == []
     assert reading_pieces('ー') and reading_pieces('★')
     assert [(t,a,b) for t,a,b,_ in reading_pieces('か、な')] == [('か',0,1),('な',2,3)]
+
+
+def test_seam_uses_first_frame_after_original_join(monkeypatch):
+    from lazulite.alignment.japanese import run
+    from lazulite.audio.concat import ConcatMap, Piece
+    from lazulite.alignment.japanese.stages import AcousticResult
+    mapping=ConcatMap(1000,100,(Piece(0,15,0,15),Piece(1015,1100,15,100)))
+    frames=FrameMap(1000,10,10,2)
+    lp=np.full((9,3),-np.log(3),np.float32)
+    acoustic=AcousticResult(lp,{'a':1,'i':2},0,frames,mapping,1.1)
+    request=JapaneseAlignmentRequest((JapaneseLine('l','あ',(JapaneseUnit('u',(0,1),'あ','ja','user'),)),))
+    captured=[]
+    original=run.decode
+    def capture(*args,**kwargs):
+        captured.append(kwargs['seam_cost'].copy())
+        return original(*args,**kwargs)
+    monkeypatch.setattr(run,'decode',capture)
+    run.decode_japanese(acoustic,request,config=JapaneseConfig(hint_mode='off'))
+    assert np.flatnonzero(captured[0]).tolist()==[2]
+    assert captured[0][2]==pytest.approx(.8)

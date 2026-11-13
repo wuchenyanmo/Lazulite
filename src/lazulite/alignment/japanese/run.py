@@ -170,7 +170,7 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
         'activity':execution.get('activity')}
     seam = np.zeros(len(lp), dtype=np.float64)
     for left, right in zip(concat.pieces, concat.pieces[1:]):
-        frame = int(round(right.concat_start / concat.sample_rate / frames.seconds))
+        frame = int(np.ceil(frames.index(right.concat_start / concat.sample_rate)))
         if 0 < frame < len(lp):
             seam[frame] += min(max((right.source_start-left.source_end)/concat.sample_rate-.2, 0), 10)
     execution['soft_costs']['removed_gap_weight'] = 1

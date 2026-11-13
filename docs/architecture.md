@@ -65,3 +65,5 @@ Lazulite 计算并返回候选。Python 3.12+；原轴时间为绝对秒，音�
 `alignment.japanese.backend.describe_model` 只检查单个目录的小配置及权重文件存在性，返回词表、blank、帧配置和所需文件。`open_backend` 支持 HF Wav2Vec2 CTC 与 TorchAudio MMS_FA；后者使用 `alignment-model.json` 声明 `{"type":"torchaudio-mms-fa","weights":"model.pt"}`，严格加载原始 31 行输出头并选择 28 行。两者共用全局一次波形标准化、20 秒核心与左右 2 秒上下文、CTC 和原轴回映。MMS_FA 在既有日语样本中存在尾点偏早限制。
 
 `alignment.japanese.input.prepare_input` 接收带稳定 ID 的请求、模型词表及 `InputOptions`，返回内部音拍/脚本片段、原单元映射、模型文本、编码范围与问题。`latin_normalize` 默认开启，假名沿用行内上下文，其余文本由 uroman 1.3.1.1 处理；`strip_tone_digits` 默认关闭，开启后删除每个空白分隔片段末尾连续数字。关闭归一化时保留附标和原字形，由词表判断。预览与执行共用 `profile_request`；日语长音派生只在归一化开启且前驱符合日语条件时生效。模型目录生命周期和编辑对象投影由调用方管理。
+
+输入准备排除非发音标点并保留发音长音符及未知字符；被排除片段不进入原单元映射。CTC 在原轴移除间隙对应的首个后继帧，对同行状态转移施加一次 λ=1 软代价。片段补全先按同行邻接裁剪，唯一候选或占总候选时长至少 80% 的最长片段可被采用，原始路径仍保留。
