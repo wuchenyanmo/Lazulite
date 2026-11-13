@@ -124,6 +124,11 @@ def test_completion_interpolates_only_same_piece_and_keeps_raw_cross_gap():
     cross=replace(unit(1,2,9),proposed_timing=Timing(),fragments=(Fragment(2,4,0),Fragment(8,9,1)),crosses_removed_gap=True)
     us=(unit(0,0,1),cross,unit(2,9,10))
     assert complete_units(req,us,concat.mapping,10)[1].proposed_timing==Timing()
+    for tail, adopted in [(8.5, True), (8.5001, False)]:
+        candidate=replace(cross,fragments=(Fragment(2,4,0),Fragment(8,tail,1)))
+        selected=complete_units(req,(unit(0,0,1),candidate,unit(2,9,10)),concat.mapping,10)[1]
+        assert (selected.proposed_timing.start is not None) == adopted
+        assert selected.raw_timing == candidate.raw_timing
     us=(unit(0,8,8.2),cross,unit(2,9,10))
     out=complete_units(req,us,concat.mapping,10)
     assert out[1].proposed_timing.start.time==8.2 and out[1].raw_timing==cross.raw_timing
