@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lazulite"
-version = "0.3.2"
+version = "0.4.0"
 description = "独立人声准备、行级证据与日语全局词级对齐引擎"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,6 +46,13 @@ vocal = [
     "demucs==4.0.1",
     "scipy==1.18.1",
     "torch>=2.6",
+]
+bs-karaoke = [
+    "torch>=2.6",
+    "einops==0.8.2",
+    "beartype==0.23.1",
+    "rotary-embedding-torch==0.9.1",
+    "PyYAML==6.0.3",
 ]
 dev = [
     "build>=1.2",
