@@ -2,10 +2,11 @@
 from dataclasses import dataclass, replace
 from functools import lru_cache
 import re
+import unicodedata
 from .kana import to_hiragana, is_kana, split_morae, is_kana_text
 from .profile import JaHepburnProfile, is_hold
 
-VERSION = 'alignment-input/1'
+VERSION = 'alignment-input/2'
 
 
 @dataclass(frozen=True)
@@ -24,8 +25,29 @@ def romanizer():
     return Uroman()
 
 
+def nonpronouncing(text):
+    return bool(text) and all(c.isspace() or unicodedata.category(c).startswith('P') for c in text) and not any(c in 'ー〜～~' for c in text)
+
+
 def reading_pieces(reading, options=InputOptions()):
     """Internal script/mora pieces, with original reading code point ranges."""
+    # Split punctuation before normalization so it cannot block sokuon context.
+    chunks = list(re.finditer(r'.', reading, re.S))
+    if any(nonpronouncing(m.group()) for m in chunks):
+        result = []
+        for match in re.finditer(r'[^\s]+|\s+', reading):
+            start = match.start()
+            run = ''
+            for i, char in enumerate(match.group()):
+                if nonpronouncing(char):
+                    if run:
+                        result.extend((t, a+start, b+start, k) for t,a,b,k in reading_pieces(run, options))
+                    run = ''; start = match.start()+i+1
+                else:
+                    run += char
+            if run:
+                result.extend((t, a+start, b+start, k) for t,a,b,k in reading_pieces(run, options))
+        return result
     if not options.latin_normalize:
         return [(reading, 0, len(reading), False)]
     # Keep combining marks and half-width voicing attached before normalization.

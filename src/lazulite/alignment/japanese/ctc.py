@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from lazulite.events import checkpoint
 
-VERSION = 'global-ctc-f64-v2'
+VERSION = 'global-ctc-f64-v3'
 DEFAULT_MEMORY = 512 * 1024 * 1024
 
 
@@ -25,7 +25,7 @@ class SoftAnchor:
 
 def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_MEMORY,
            cancel=None, event_sink=None, token_lines=None, frame_seconds=None,
-           line_blank=False, rest_blank=False, rest_token=False, rest=None):
+           line_blank=False, rest_blank=False, rest_token=False, rest=None, seam_cost=None):
     lp = np.asarray(logp)
     targets = np.asarray(targets, dtype=np.int64)
     if lp.ndim != 2 or np.isnan(lp).any() or np.isposinf(lp).any():
@@ -59,6 +59,19 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
         rest = np.asarray(rest, dtype=np.float64)
         if rest.shape != (T,) or not np.isfinite(rest).all() or np.any((rest < 0) | (rest > 1)):
             raise ValueError('rest must be one finite 0–1 value per frame')
+    owners = np.full(S, -1, dtype=np.int64)
+    if seam_cost is not None:
+        seam_cost = np.asarray(seam_cost, dtype=np.float64)
+        if seam_cost.shape != (T,) or not np.isfinite(seam_cost).all() or np.any(seam_cost < 0):
+            raise ValueError('invalid seam costs')
+        if token_lines is None or len(token_lines) != len(targets):
+            raise ValueError('token line identities required for seam costs')
+        identities = {line:i for i,line in enumerate(dict.fromkeys(token_lines))}
+        owners[1::2] = [identities[line] for line in token_lines]
+        owners[2:-1:2] = np.where(owners[1:-2:2] == owners[3::2], owners[3::2], -1)
+    stay_owned = owners >= 0
+    one_owned = stay_owned & (owners == np.r_[-2, owners[:-1]])
+    two_owned = stay_owned & (owners == np.r_[-2, -2, owners[:-2]])
     def frame_cost(t):
         c = np.zeros(S, np.float64)
         c[gap_states] = -frame_seconds * (int(line_blank) + (4 * rest[t] if rest_blank else 0))
@@ -90,11 +103,12 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
         if t % 128 == 0:
             checkpoint(cancel,event_sink,'decode',t,T)
         c = costs(t)
-        best = prev.copy()
-        one = np.r_[-np.inf,prev[:-1]] + c
+        penalty = 0 if seam_cost is None else seam_cost[t]
+        best = prev.copy() - penalty * stay_owned
+        one = np.r_[-np.inf,prev[:-1]] + c - penalty * one_owned
         take = one > best
         best[take] = one[take]; bp[t,take] = 1
-        two = np.r_[-np.inf,-np.inf,prev[:-2]] + c
+        two = np.r_[-np.inf,-np.inf,prev[:-2]] + c - penalty * two_owned
         take = skip & (two > best)
         best[take] = two[take]; bp[t,take] = 2
         prev = best + lp[t,z].astype(np.float64)

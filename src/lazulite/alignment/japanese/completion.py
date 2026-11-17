@@ -3,7 +3,7 @@ from dataclasses import replace
 from lazulite.models.japanese import Endpoint,Timing,JapaneseIssue
 from .kana import split_morae,is_kana_text
 
-VERSION='local-piece-completion-v1'
+VERSION='local-piece-completion-v2'
 
 
 def complete_units(request, units, concat, duration):
@@ -32,6 +32,10 @@ def complete_units(request, units, concat, duration):
                 b=min(f.end,nxt.time if nxt else duration)
                 if a<b:
                     candidates.append((a,b))
+            if len(candidates)>1:
+                longest=max(candidates,key=lambda p:p[1]-p[0])
+                if longest[1]-longest[0] >= .8*sum(b-a for a,b in candidates):
+                    candidates=[longest]
             if len(candidates)==1:
                 set_timing(i,*candidates[0],'fragment_selected',tuple(x.unit_id for x in result[max(0,i-1):i+2]))
         # Missing runs may only use a positive interval within one retained piece.

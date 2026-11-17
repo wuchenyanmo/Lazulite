@@ -1,5 +1,6 @@
 """Independent Japanese stages, retaining every requested object ID."""
 from dataclasses import asdict, dataclass
+import numpy as np
 from lazulite.audio.concat import concatenate_cores
 from lazulite.events import checkpoint, ProgressEvent
 from lazulite.models.audio import PreparedVocals
@@ -167,7 +168,13 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
     execution['soft_costs']={**priors,'per_second':{'line_blank':int(config.line_blank),
         'rest_blank':4*int(config.rest_blank),'rest_token':25*int(config.rest_token)},
         'activity':execution.get('activity')}
-    options={**priors,'blank':acoustic.blank_id,
+    seam = np.zeros(len(lp), dtype=np.float64)
+    for left, right in zip(concat.pieces, concat.pieces[1:]):
+        frame = int(np.ceil(frames.index(right.concat_start / concat.sample_rate)))
+        if 0 < frame < len(lp):
+            seam[frame] += min(max((right.source_start-left.source_end)/concat.sample_rate-.2, 0), 10)
+    execution['soft_costs']['removed_gap_weight'] = 1
+    options={**priors,'blank':acoustic.blank_id,'seam_cost':seam,
         'token_lines':[l.line_id for l in request.lines for u in l.units for _ in range(*ranges[u.unit_id])],
         'frame_seconds':frames.seconds,'rest':rest,'max_decode_memory_bytes':config.max_decode_memory_bytes,
         'cancel':cancel,'event_sink':event_sink}

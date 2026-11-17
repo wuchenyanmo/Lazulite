@@ -100,3 +100,46 @@ def test_disabled_costs_match_frozen_v1():
         for _ in range(20):
             lp=rng.normal(size=(12,4)).astype(np.float32)
             assert decode(lp,targets,blank=0)==old.decode(lp,targets,blank=0)
+
+@pytest.mark.parametrize('lines', [('a','a'), ('a','b')])
+def test_seam_cost_matches_transition_enumeration(lines):
+    lp = np.random.default_rng(9).normal(size=(6,3))
+    seam = np.array([0,0,3,0,0,0])
+    owners = [-1,0,0 if lines[0]==lines[1] else -1,0 if lines[0]==lines[1] else 1,-1]
+    z = [0,1,0,2,0]
+    scores=[]
+    for path in itertools.product(range(5),repeat=6):
+        if path[0] not in (0,1) or path[-1] not in (3,4): continue
+        if any(not (b==a or b==a+1 or b==a+2 and z[b]!=0 and z[b]!=z[a]) for a,b in zip(path,path[1:])): continue
+        scores.append(sum(lp[t,z[s]] for t,s in enumerate(path))-sum(seam[t] for t in range(1,6) if owners[path[t]]>=0 and owners[path[t]]==owners[path[t-1]]))
+    assert decode(lp,[1,2],0,token_lines=lines,seam_cost=seam)[1] == pytest.approx(max(scores))
+    assert decode(lp,[1,2],0,token_lines=lines,seam_cost=seam*0) == decode(lp,[1,2],0)
+
+
+def test_punctuation_pieces_preserve_sokuon_and_unknown():
+    from lazulite.alignment.japanese.input import reading_pieces, model_texts
+    assert model_texts(['っ','、','か']) == ['k','','ka']
+    assert model_texts(['か','っ']) == ['ka','']
+    assert reading_pieces('、。') == []
+    assert reading_pieces('ー') and reading_pieces('★')
+    assert [(t,a,b) for t,a,b,_ in reading_pieces('か、な')] == [('か',0,1),('な',2,3)]
+
+
+def test_seam_uses_first_frame_after_original_join(monkeypatch):
+    from lazulite.alignment.japanese import run
+    from lazulite.audio.concat import ConcatMap, Piece
+    from lazulite.alignment.japanese.stages import AcousticResult
+    mapping=ConcatMap(1000,100,(Piece(0,15,0,15),Piece(1015,1100,15,100)))
+    frames=FrameMap(1000,10,10,2)
+    lp=np.full((9,3),-np.log(3),np.float32)
+    acoustic=AcousticResult(lp,{'a':1,'i':2},0,frames,mapping,1.1)
+    request=JapaneseAlignmentRequest((JapaneseLine('l','あ',(JapaneseUnit('u',(0,1),'あ','ja','user'),)),))
+    captured=[]
+    original=run.decode
+    def capture(*args,**kwargs):
+        captured.append(kwargs['seam_cost'].copy())
+        return original(*args,**kwargs)
+    monkeypatch.setattr(run,'decode',capture)
+    run.decode_japanese(acoustic,request,config=JapaneseConfig(hint_mode='off'))
+    assert np.flatnonzero(captured[0]).tolist()==[2]
+    assert captured[0][2]==pytest.approx(.8)
