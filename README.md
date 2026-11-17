@@ -5,7 +5,7 @@
 关联项目：基于 TTML 歌词格式的功能强大的歌词编辑和打轴工具 [Lazulite Studio](https://github.com/zet-wu/Lazulite-studio)
 
 - 搜索网易云、QQ 音乐、酷狗与 LRCLIB 歌词候选。
-- 使用 Demucs 分离完整人声，分析声学活动与人声片段。
+- 使用 Demucs 分离完整人声，或使用可选 BS Karaoke 分离主唱，分析声学活动与人声片段。
 - 行级对齐路线：提供通用的跨语言行级对齐能力，使用 Whisper 转写各人声片段，在歌词无参考时间的情况下使用动态规划将片段与歌词对齐，在歌词有参考时间的情况下估计歌词时间的总体/分段偏移
 - 日语词级对齐路线：不依赖行级结果，使用人声片段拼接、Wav2Vec2 CTC 词级对齐、可选的行首提示校准和端点整理。
 - 支持读取文本、LRC 和 TTML。
@@ -24,6 +24,28 @@ python -m pip install -c constraints.txt '.[whisper,japanese,vocal]'
 ```
 
 模型路径指向本地目录。依赖约束提供各个模块的独立依赖的安装版本参考，CUDA Torch 构建或安装应当按实际部署环境选择。
+
+## BS Karaoke 主唱分离
+
+安装可选依赖 `python -m pip install '.[bs-karaoke]'`。本地模型目录保存
+`bs_roformer_karaoke_frazer_becruily.ckpt` 和 `config_karaoke_frazer_becruily.yaml`，
+推理实现随 Lazulite 安装，权重由使用者按其许可条件准备。
+
+```python
+from lazulite.audio import BSKaraokeConfig, BSKaraokeSeparator, decode_audio
+from lazulite.audio.preparation import prepare_vocals
+
+separator = BSKaraokeSeparator(BSKaraokeConfig('/models/bs-karaoke', device='cpu'))
+try:
+    prepared = prepare_vocals(decode_audio('song.m4a', sample_rate=44100, channels=2), separator=separator)
+finally:
+    separator.close()
+```
+
+CPU 使用 float32，NVIDIA GPU 可选择 `device='cuda'`。按配置执行固定窗口及重叠拼接，
+输出为 44.1 kHz 双声道主唱，保留音频来源身份与时长。原曲减去主唱后的残余包含伴奏和和声。
+`DemucsSeparator` 和 `BSKaraokeSeparator` 共用 `separate(AudioBuffer) -> AudioBuffer` 契约；
+命令行默认分离器继续使用 Demucs。
 
 ## 命令行
 
