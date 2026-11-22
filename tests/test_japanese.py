@@ -7,7 +7,7 @@ from lazulite.audio.preparation import prepare_existing_vocals
 from lazulite.models.audio import AudioBuffer,VocalAnalysis,VocalSegment
 from lazulite.models.japanese import JapaneseAlignmentRequest,JapaneseLine,JapaneseUnit
 from lazulite.alignment.japanese.ctc import decode,NoFeasiblePath,SoftAnchor
-from lazulite.alignment.japanese.backend import chunked_forward,NextFireConfig
+from lazulite.alignment.japanese.backend import chunked_forward
 from lazulite.alignment.japanese.run import align_japanese, compute_acoustics
 from lazulite.alignment.japanese.stages import FrameMap
 from fixtures.acoustic import Backend

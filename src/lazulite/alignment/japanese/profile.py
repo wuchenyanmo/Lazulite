@@ -19,8 +19,7 @@ string per unit so token positions map back to units.
 * a unit that is only a long mark (ー) gets **no tokens**: a held vowel has no
   break in it, and CTC can only emit the same letter twice in a row with a
   blank between them, so a doubled vowel squeezed the ー into one frame.  The
-  aligner gives it time from the unit before it instead
-  (:func:`kara_align.align.decoding.apply_holds`).  A ー inside a unit
+  aligner gives it time from the unit before it instead.  A ー inside a unit
   (あーる) is simply dropped (``aru``).
 * neighbours are only taken from the units passed in one call: the aligner
   calls the profile once per lyric line, so a line-final っ is empty and a

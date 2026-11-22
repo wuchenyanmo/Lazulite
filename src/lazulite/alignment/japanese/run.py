@@ -1,7 +1,9 @@
 """Independent Japanese stages, retaining every requested object ID."""
 from dataclasses import asdict, dataclass
+from math import ceil
 import numpy as np
-from lazulite.audio.concat import concatenate_cores
+from lazulite.audio.concat import build_concat_map, concatenate_cores
+from lazulite.audio.io import resample_audio
 from lazulite.events import checkpoint, ProgressEvent
 from lazulite.models.audio import PreparedVocals
 from lazulite.models.japanese import (
@@ -24,8 +26,8 @@ class JapaneseConfig:
     strip_tone_digits: bool = False
 
     def __post_init__(self):
-        if any(type(v) is not bool for v in (self.line_blank, self.rest_blank, self.rest_token, self.latin_normalize, self.strip_tone_digits)):
-            raise ValueError('soft cost switches must be boolean')
+        if any(not isinstance(v, bool) for v in (self.line_blank, self.rest_blank, self.rest_token, self.latin_normalize, self.strip_tone_digits)):
+            raise ValueError('Japanese boolean options must be bool')
         if self.hint_mode not in {'off','auto'} or self.max_decode_memory_bytes <= 0:
             raise ValueError('invalid Japanese configuration')
 
@@ -102,9 +104,12 @@ def _result(request,units,execution,calibration,issues=()):
     full=sum(complete(u.proposed_timing) for u in units)
     single=sum((u.proposed_timing.start is None)!=(u.proposed_timing.end is None) for u in units)
     derived=sum(any(e is not None and e.source!='acoustic_path' for e in (u.proposed_timing.start,u.proposed_timing.end)) for u in units)
+    by_line = {}
+    for u in units:
+        by_line.setdefault(u.line_id, []).append(u)
     lines=[]
     for line in request.lines:
-        group=[u for u in units if u.line_id==line.line_id]
+        group=by_line.get(line.line_id, ())
         starts=[u.proposed_timing.start.time for u in group if u.proposed_timing.start is not None]
         ends=[u.proposed_timing.end.time for u in group if u.proposed_timing.end is not None]
         lines.append({'line_id':line.line_id,'start':min(starts) if starts else None,'end':max(ends) if ends else None,
@@ -119,17 +124,18 @@ def _result(request,units,execution,calibration,issues=()):
 
 
 def compute_acoustics(prepared: PreparedVocals, *, backend, include_activity=False, cancel=None, event_sink=None):
-    prepared.__post_init__()
     checkpoint(cancel,event_sink,'concat')
     segments=() if prepared.segment_source=='automatic' and prepared.analysis.is_vocal is False else prepared.segments
-    concat=concatenate_cores(prepared.vocals,segments,sample_rate=backend.frames.sample_rate)
+    mono_16k = resample_audio(prepared.vocals, sample_rate=16000, channels=1) if backend.frames.sample_rate == 16000 or include_activity else None
+    concat_source = mono_16k if backend.frames.sample_rate == 16000 else prepared.vocals
+    concat=concatenate_cores(concat_source,segments,sample_rate=backend.frames.sample_rate)
     lp=backend.emissions(concat.audio,cancel=cancel,event_sink=event_sink)
     if lp.shape != (backend.frames.count(concat.audio.samples.shape[1]),backend.vocabulary_size):
         raise ValueError('acoustic output shape does not match backend frame contract')
     rest,activity=None,None
     if include_activity:
         from .activity import frame_activity
-        rest,activity=frame_activity(prepared,concat.mapping,len(lp),backend.frames)
+        rest,activity=frame_activity(prepared,concat.mapping,len(lp),backend.frames,mono_16k)
     checkpoint(cancel)
     return AcousticResult(lp,dict(backend.vocab),backend.blank,backend.frames,concat.mapping,
         prepared.original_duration,rest,{'backend':backend.description,'activity':activity,
@@ -141,8 +147,6 @@ def compute_acoustics(prepared: PreparedVocals, *, backend, include_activity=Fal
 
 def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest, *,
                     config=JapaneseConfig(), prepared=None, encoder=None, cancel=None, event_sink=None):
-    request.__post_init__()
-    acoustic.__post_init__()
     checkpoint(cancel,event_sink,'decode')
     texts,tokens,ranges,problems=_profile(request,acoustic.vocabulary,acoustic.blank_id,acoustic.special_tokens,encoder,InputOptions(config.latin_normalize, config.strip_tone_digits))
     concat,frames,lp=acoustic.mapping,acoustic.frames,acoustic.log_probabilities
@@ -157,8 +161,13 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
     if config.rest_blank or config.rest_token:
         if rest is None:
             if prepared is None: raise ValueError('rest costs require frame activity or complete vocals')
-            prepared.__post_init__()
-            expected=concatenate_cores(prepared.vocals,prepared.segments,sample_rate=frames.sample_rate).mapping
+            total_samples = (
+                prepared.vocals.samples.shape[1]
+                if prepared.vocals.sample_rate == frames.sample_rate
+                else ceil(prepared.vocals.samples.shape[1] * frames.sample_rate / prepared.vocals.sample_rate)
+            )
+            prepared_segments = () if prepared.segment_source == 'automatic' and prepared.analysis.is_vocal is False else prepared.segments
+            expected=build_concat_map(prepared_segments,frames.sample_rate,total_samples=total_samples)
             if expected!=concat or prepared.original_duration!=acoustic.original_duration:
                 raise ValueError('activity vocals do not match acoustic coordinates')
             from .activity import frame_activity
@@ -204,7 +213,6 @@ def decode_japanese(acoustic: AcousticResult, request: JapaneseAlignmentRequest,
 
 
 def finalize_japanese(decoded: DecodeResult, *, completion=True, cancel=None,event_sink=None):
-    decoded.__post_init__()
     checkpoint(cancel,event_sink,'completion')
     request=decoded.request
     execution={**decoded.execution,'config':{**decoded.execution['config'],'completion':completion}}

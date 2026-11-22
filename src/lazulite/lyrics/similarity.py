@@ -7,10 +7,7 @@ from difflib import SequenceMatcher
 from .normalize import normalize_lyric_text
 
 
-def text_similarity(left: str | None, right: str | None) -> float:
-    """返回两个歌词匹配视图的 [0, 1] 相似度；空正文没有匹配资格。"""
-    normalized_left = normalize_lyric_text(left)
-    normalized_right = normalize_lyric_text(right)
+def _normalized_similarity(normalized_left: str, normalized_right: str) -> float:
     if not normalized_left or not normalized_right:
         return 0.0
     ratio = SequenceMatcher(None, normalized_left, normalized_right).ratio()
@@ -30,6 +27,11 @@ def text_similarity(left: str | None, right: str | None) -> float:
         + 0.26 * len(ba & bb) / max(len(ba | bb), 1)
         + 0.12 * min(len(ua & ub) / max(len(ua), 1), len(ua & ub) / max(len(ub), 1))
     )
+
+
+def text_similarity(left: str | None, right: str | None) -> float:
+    """返回两个歌词匹配视图的 [0, 1] 相似度；空正文没有匹配资格。"""
+    return _normalized_similarity(normalize_lyric_text(left), normalize_lyric_text(right))
 
 
 def prefix_similarity(

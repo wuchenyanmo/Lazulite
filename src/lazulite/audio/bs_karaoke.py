@@ -47,13 +47,16 @@ class BSKaraokeSeparator:
         return self._model
 
     def separate(self, audio: AudioBuffer) -> AudioBuffer:
-        import numpy as np
         import torch
         import torch.nn.functional as F
         prepared = resample_audio(audio, sample_rate=44100, channels=2)
         model = self._load()
+        multi_stem = len(getattr(model, 'mask_estimators', ())) > 1
         # Accumulation stays on CPU; only a single window resides on the device.
-        mix = torch.from_numpy(prepared.samples.copy())
+        samples = prepared.samples if (
+            prepared.samples.flags.c_contiguous and prepared.samples.flags.writeable
+        ) else prepared.samples.copy()
+        mix = torch.from_numpy(samples)
         size = self._settings['audio']['chunk_size']
         step = size // self._settings['inference']['num_overlap']
         border = size - step
@@ -71,22 +74,26 @@ class BSKaraokeSeparator:
                 length = part.shape[-1]
                 if length < size:
                     part = F.pad(part, (0, size - length), mode='reflect' if length > size // 2 + 1 else 'constant')
-                output = model(part.unsqueeze(0).to(self.config.device))[0]
+                batch = part.unsqueeze(0).to(self.config.device)
+                output = (model(batch, active_stem_ids=[0]) if multi_stem else model(batch))[0]
                 if output.ndim == 3:
                     output = output[0]
                 output = output.detach().float().cpu()
-                weights = window.clone()
-                if offset == 0:
-                    weights[:fade] = 1
-                if offset + size >= mix.shape[-1]:
-                    weights[-fade:] = 1
+                is_first = offset == 0
+                is_last = offset + size >= mix.shape[-1]
+                if is_first or is_last:
+                    weights = window.clone()
+                    if is_first:
+                        weights[:fade] = 1
+                    if is_last:
+                        weights[-fade:] = 1
+                else:
+                    weights = window
                 result[:, offset:offset + length] += output[:, :length] * weights[:length]
                 counter[:, offset:offset + length] += weights[:length]
         output = (result / counter).numpy()
         if padded:
             output = output[:, border:-border]
-        if not np.isfinite(output).all():
-            raise RuntimeError('BS Karaoke produced nonfinite samples')
         return AudioBuffer(output, 44100, audio.source_id)
 
     def close(self):

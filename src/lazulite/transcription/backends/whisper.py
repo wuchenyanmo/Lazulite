@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Sequence

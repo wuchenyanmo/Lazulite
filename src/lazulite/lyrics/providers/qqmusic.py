@@ -89,8 +89,6 @@ def candidate_from_qq_result(
         ),
     )
     candidate_id = clean_text(result.get("mid") or result.get("songmid"))
-    if not candidate_id:
-        raise ValueError("QQ 音乐搜索结果缺少 songmid")
     return SearchCandidate(
         "qqmusic",
         candidate_id,

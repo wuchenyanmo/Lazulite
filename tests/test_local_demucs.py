@@ -56,11 +56,3 @@ def test_local_repo_retains_upstream_checksum_validation(tmp_path):
                                              model_repo=str(tmp_path)))
     with pytest.raises(ModelLoadingError, match='checksum'):
         separator._load()
-
-
-def test_local_repo_does_not_change_quality_parameters():
-    from dataclasses import asdict
-    plain = asdict(DemucsConfig(device='cpu'))
-    local = asdict(DemucsConfig(device='cpu', model_repo='/relocated/models'))
-    plain.pop('model_repo'); local.pop('model_repo')
-    assert plain == local

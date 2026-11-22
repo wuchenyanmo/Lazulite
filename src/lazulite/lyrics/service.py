@@ -18,7 +18,8 @@ from lazulite.lyrics.providers import (
     QQMusicProvider,
     SearchCandidate,
 )
-from lazulite.lyrics.similarity import text_similarity
+from lazulite.lyrics.normalize import normalize_lyric_text
+from lazulite.lyrics.similarity import _normalized_similarity, text_similarity
 from lazulite.models.audio import AudioMetadata
 from lazulite.models.audio import VocalAnalysis
 from lazulite.models.transcription import TranscriptionResult
@@ -214,26 +215,47 @@ def content_similarity(left, right):
     )
 
 
-def _content_evidence(item, transcription, analysis=None):
-    lyrics = [line.text for line in item.lyrics.document.lines if line.text.strip()]
+def _prepare_usable_segments(transcription, analysis, converter):
     by_id = {s.id: s for s in analysis.segments} if analysis else {}
-    usable = [
-        t
-        for t in transcription.segments
-        if t.text.strip() and quality(t.text, by_id.get(t.source_segment_id)).usable
+    prepared = []
+    for segment in transcription.segments:
+        if segment.text.strip() and quality(segment.text, by_id.get(segment.source_segment_id)).usable:
+            raw_norm = normalize_lyric_text(segment.text)
+            simp_norm = normalize_lyric_text(converter.convert(segment.text))
+            prepared.append((raw_norm, simp_norm, comparable_confidence(segment)))
+    return prepared
+
+
+def _content_evidence(item, transcription, analysis=None, *, usable_prepared=None, converter=None):
+    converter = converter or _traditional_to_simplified()
+    usable = (
+        _prepare_usable_segments(transcription, analysis, converter)
+        if usable_prepared is None
+        else usable_prepared
+    )
+    lyrics = [
+        (normalize_lyric_text(line.text), normalize_lyric_text(converter.convert(line.text)))
+        for line in item.lyrics.document.lines
+        if line.text.strip()
     ]
     matched = set()
     weighted = []
-    for segment in usable:
+    for seg_raw, seg_simp, confidence in usable:
         if not lyrics:
             break
-        scores = [content_similarity(line, segment.text) for line in lyrics]
-        index = max(range(len(scores)), key=scores.__getitem__)
-        if scores[index] < 0.28:
+        best_index = -1
+        best_score = -1.0
+        for index, (line_raw, line_simp) in enumerate(lyrics):
+            score = _normalized_similarity(line_raw, seg_raw)
+            if line_simp != line_raw or seg_simp != seg_raw:
+                score = max(score, _normalized_similarity(line_simp, seg_simp))
+            if score > best_score:
+                best_score = score
+                best_index = index
+        if best_score < 0.28:
             continue
-        confidence = comparable_confidence(segment)
-        weighted.append(scores[index] * (confidence if confidence is not None else 1))
-        matched.add(index)
+        weighted.append(best_score * (confidence if confidence is not None else 1))
+        matched.add(best_index)
     mean = sum(weighted) / len(weighted) if weighted else 0
     coverage = len(matched) / max(min(len(usable), len(lyrics)), 1)
     score = min(1.0, 0.70 * mean + 0.30 * coverage)
@@ -244,10 +266,6 @@ def _content_evidence(item, transcription, analysis=None):
         ("weighted_similarity", mean),
         ("unique_line_ratio", coverage),
     )
-
-
-def _content_score(item, transcription, analysis=None):
-    return _content_evidence(item, transcription, analysis)[0]
 
 
 def rank_lyrics(
@@ -263,10 +281,14 @@ def rank_lyrics(
         raise ValueError("metadata_weight 必须在 [0, 1] 内")
     selected = tuple(providers) if providers is not None else build_default_providers()
     priority = {provider.source_name: provider.priority for provider in selected}
+    converter = _traditional_to_simplified()
+    usable_prepared = _prepare_usable_segments(transcription, analysis, converter)
     ranked: list[RankedLyricCandidate] = []
     for item in candidates:
         metadata_score = max(0.0, min(1.0, item.candidate.match_score / 100.0))
-        content_score, diagnostics = _content_evidence(item, transcription, analysis)
+        content_score, diagnostics = _content_evidence(
+            item, transcription, analysis, usable_prepared=usable_prepared, converter=converter
+        )
         ranked.append(
             RankedLyricCandidate(
                 item=item,

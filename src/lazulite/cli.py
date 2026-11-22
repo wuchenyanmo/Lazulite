@@ -18,13 +18,10 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
 
 
-def _add_backend_options(parser: argparse.ArgumentParser, *, forced: bool = False, required: bool = True) -> None:
-    parser.add_argument("--backend", choices=("qwen",) if forced else ("whisper", "qwen"), required=required)
+def _add_backend_options(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+    parser.add_argument("--backend", choices=("whisper",), required=required)
     parser.add_argument("--model-path", type=Path, required=required)
     parser.add_argument("--model-id", default=None)
-    parser.add_argument("--device-map", default="cuda:0", help="Qwen 使用的 Transformers device_map")
-    if forced:
-        return
     parser.add_argument("--device", default="cuda", help="Whisper 使用的 Torch 设备")
     parser.add_argument("--precision", choices=("float16", "float32"), help="默认 CPU float32，CUDA float16")
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Whisper 生成上限")
@@ -43,13 +40,17 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--vocals", type=Path, help="完整人声音频")
     source.add_argument("--acoustic-input", type=Path, help="显式声学 NPZ")
     source.add_argument("--decode-input", type=Path, help="显式解码 JSON")
-    source.add_argument("--audio", type=Path, help="原曲音频（自动 Demucs 准备）")
+    source.add_argument("--audio", type=Path, help="原曲音频（自动人声分离）")
     target = japanese.add_mutually_exclusive_group(required=True)
     target.add_argument("--targets", type=Path, help="lazulite-japanese-request-v1 JSON")
     target.add_argument("--ttml", type=Path, help="TTML 正文与 Ruby 最小投影")
     japanese.add_argument("--without-completion", action="store_true", help="只输出固定 profile 原始路线")
-    japanese.add_argument("--model-path", type=Path, help="本地 Wav2Vec2 CTC 模型目录")
+    japanese.add_argument("--model-path", type=Path, help="本地声学对齐模型目录（Wav2Vec2 CTC 或 MMS_FA）")
     japanese.add_argument("--device", default="cpu")
+    japanese.add_argument("--separator", choices=("demucs", "bs-karaoke"), default="demucs")
+    japanese.add_argument("--vocal-model-repo", "--bs-karaoke-repo", dest="vocal_model_repo", default=None, help="人声分离本地模型仓库目录")
+    japanese.add_argument("--latin-normalize", action=argparse.BooleanOptionalAction, default=True, help="启用或禁用拉丁/假名归一化")
+    japanese.add_argument("--strip-tone-digits", action="store_true", help="剥离拼音/声调数字后缀")
     japanese.add_argument("--acoustic-output", type=Path)
     japanese.add_argument("--decode-output", type=Path)
     japanese.add_argument("--hint-mode", choices=("off", "auto"), default="auto")
@@ -84,41 +85,24 @@ def build_parser() -> argparse.ArgumentParser:
     align.add_argument("--separator-model")
     align.add_argument("--separator-device")
     align.add_argument("--output", type=Path, required=True)
-
-    forced = commands.add_parser("forced-align", help="用已确认文本执行独立 forced alignment")
-    forced.add_argument("audio", type=Path)
-    forced.add_argument("text", type=Path, help="只包含已确认正文的 UTF-8 文本文件")
-    _add_backend_options(forced, forced=True)
-    forced.add_argument("--language")
-    forced.add_argument("--line-id", default="line-0")
-    forced.add_argument("--audio-origin", type=float, default=0.0, help="输入音频窗口相对于整曲的秒数")
-    forced.add_argument("--output", type=Path, required=True)
     return parser
 
 
 def _build_transcriber(arguments: argparse.Namespace):
-    from .transcription.backends import QwenBackend, QwenConfig, WhisperBackend, WhisperConfig
+    from .transcription.backends import WhisperBackend, WhisperConfig
 
     if arguments.backend is None or arguments.model_path is None:
         raise ValueError("转写计算需要 --backend 和 --model-path")
     distributions = arguments.full_distributions
     if distributions is not None:
         distributions.mkdir(parents=True, exist_ok=True)
-    if arguments.backend == "whisper":
-        return WhisperBackend(WhisperConfig(
-            model_path=arguments.model_path,
-            model_id=arguments.model_id,
-            device=arguments.device,
-            precision=arguments.precision or ("float32" if arguments.device=="cpu" else "float16"),
-            top_k=arguments.top_k,
-            max_new_tokens=arguments.max_new_tokens,
-            distribution_output_dir=distributions,
-        ))
-    return QwenBackend(QwenConfig(
+    return WhisperBackend(WhisperConfig(
         model_path=arguments.model_path,
         model_id=arguments.model_id,
-        device_map=arguments.device_map,
+        device=arguments.device,
+        precision=arguments.precision or ("float32" if arguments.device=="cpu" else "float16"),
         top_k=arguments.top_k,
+        max_new_tokens=arguments.max_new_tokens,
         distribution_output_dir=distributions,
     ))
 
@@ -132,8 +116,14 @@ def _run_japanese(arguments: argparse.Namespace) -> int:
     else:
         from .lyrics.ttml import read_ttml_for_japanese
         request=read_ttml_for_japanese(arguments.ttml)
+    separator_kind = getattr(arguments, "separator", "demucs")
+    vocal_model_repo = getattr(arguments, "vocal_model_repo", None)
+    if arguments.audio is None and (separator_kind != "demucs" or vocal_model_repo is not None):
+        raise ValueError("非原曲音频输入不接受分离参数")
     config=JapaneseConfig(hint_mode=arguments.hint_mode,max_decode_memory_bytes=arguments.max_decode_memory_bytes,
-                          completion=not arguments.without_completion)
+                          completion=not arguments.without_completion,
+                          latin_normalize=getattr(arguments, "latin_normalize", True),
+                          strip_tone_digits=getattr(arguments, "strip_tone_digits", False))
     if arguments.decode_input is not None:
         if arguments.model_path is not None or arguments.acoustic_output is not None:
             raise ValueError('解码输入不接受声学模型或声学输出')
@@ -150,12 +140,18 @@ def _run_japanese(arguments: argparse.Namespace) -> int:
             if arguments.vocals is not None:
                 prepared=prepare_existing_vocals(decode_native_audio(arguments.vocals))
             else:
-                from .audio.separation import DemucsSeparator,DemucsConfig
-                separator=DemucsSeparator(DemucsConfig(device=arguments.device))
+                if separator_kind == "bs-karaoke":
+                    if not vocal_model_repo:
+                        raise ValueError("bs-karaoke 分离需要 --vocal-model-repo")
+                    from .audio.bs_karaoke import BSKaraokeConfig, BSKaraokeSeparator
+                    separator = BSKaraokeSeparator(BSKaraokeConfig(vocal_model_repo, device=arguments.device))
+                else:
+                    from .audio.separation import DemucsConfig, DemucsSeparator
+                    separator = DemucsSeparator(DemucsConfig(device=arguments.device, model_repo=vocal_model_repo))
                 try: prepared=prepare_vocals(decode_audio(arguments.audio,sample_rate=44100,channels=2),separator=separator)
                 finally: separator.close()
-            from .alignment.japanese.backend import NextFireBackend,NextFireConfig
-            backend=NextFireBackend(NextFireConfig(arguments.model_path,arguments.device))
+            from .alignment.japanese.backend import open_backend
+            backend=open_backend(arguments.model_path, device=arguments.device)
             try: acoustic=compute_acoustics(prepared,backend=backend)
             finally: backend.close()
         if arguments.acoustic_output is not None: write_acoustic(arguments.acoustic_output,acoustic)
@@ -241,34 +237,11 @@ def _run_align(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _run_forced_alignment(arguments: argparse.Namespace) -> int:
-    from .alignment.forced.qwen import QwenForcedAligner, QwenForcedAlignmentConfig
-    from .audio.io import decode_audio
-    from .models.alignment import ForcedAlignmentRequest
-
-    text = arguments.text.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("确认文本不能为空")
-    aligner = QwenForcedAligner(QwenForcedAlignmentConfig(
-        model_path=arguments.model_path,
-        model_id=arguments.model_id,
-        device_map=arguments.device_map,
-    ))
-    try:
-        request = ForcedAlignmentRequest(arguments.line_id, text, arguments.language, arguments.audio_origin, (0, len(text)), "word")
-        result = aligner.align(decode_audio(arguments.audio), request=request)
-        _write_json(arguments.output, asdict(result))
-    finally:
-        aligner.close()
-    return 0
-
-
 _HANDLERS: dict[tuple[str, str | None], Callable[[argparse.Namespace], int]] = {
     ("align-japanese", None): _run_japanese,
     ("lyrics", "search"): _run_lyrics_search,
     ("transcribe", None): _run_transcribe,
     ("align", None): _run_align,
-    ("forced-align", None): _run_forced_alignment,
 }
 
 
@@ -276,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     """运行命令；库异常保留原因，CLI 仅将其转为简洁的非零退出。"""
     arguments = build_parser().parse_args(argv)
     try:
-        inputs=[getattr(arguments,name,None) for name in ('audio','vocals','targets','ttml','lyrics','text','acoustic_input','decode_input','transcriptions_input')]
+        inputs=[getattr(arguments,name,None) for name in ('audio','vocals','targets','ttml','lyrics','acoustic_input','decode_input','transcriptions_input')]
         outputs=[getattr(arguments,name,None) for name in ('output','acoustic_output','decode_output','transcriptions_output')]
         paths=[p.resolve() for p in outputs if p is not None]
         model=getattr(arguments,'model_path',None)

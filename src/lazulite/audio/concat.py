@@ -89,22 +89,36 @@ class ConcatAudio:
         return self.mapping.fragments(start, end)
 
 
-def concatenate_cores(vocals: AudioBuffer, segments: tuple[VocalSegment, ...], *, sample_rate: int = 16000) -> ConcatAudio:
-    mono = resample_audio(vocals, sample_rate=sample_rate, channels=1)
+def build_concat_map(
+    segments: tuple[VocalSegment, ...],
+    sample_rate: int = 16000,
+    *,
+    total_samples: int | None = None,
+) -> ConcatMap:
+    """将核心人声区间合并为单调不重叠的拼接坐标映射，不解码或重采样音频。"""
     intervals = []
     for s in segments:
-        a, b = max(0, floor(s.core_start * sample_rate)), min(mono.samples.shape[1], ceil(s.core_end * sample_rate))
-        if b > a:
-            intervals.append((a,b))
+        lo = max(0, floor(s.core_start * sample_rate))
+        hi = ceil(s.core_end * sample_rate)
+        if total_samples is not None:
+            hi = min(total_samples, hi)
+        if hi > lo:
+            intervals.append((lo, hi))
     merged = []
-    for a,b in sorted(intervals):
+    for a, b in sorted(intervals):
         if merged and a <= merged[-1][1]:
             merged[-1][1] = max(merged[-1][1], b)
         else:
-            merged.append([a,b])
+            merged.append([a, b])
     offset, pieces = 0, []
-    for a,b in merged:
-        pieces.append(Piece(a,b,offset,offset+b-a))
-        offset += b-a
-    samples = np.concatenate([mono.samples[:,a:b] for a,b in merged], axis=1) if merged else np.empty((1,0),np.float32)
-    return ConcatAudio(AudioBuffer(samples, sample_rate, vocals.source_id), tuple(pieces))
+    for a, b in merged:
+        pieces.append(Piece(a, b, offset, offset + b - a))
+        offset += b - a
+    return ConcatMap(sample_rate, offset, tuple(pieces))
+
+
+def concatenate_cores(vocals: AudioBuffer, segments: tuple[VocalSegment, ...], *, sample_rate: int = 16000) -> ConcatAudio:
+    mono = resample_audio(vocals, sample_rate=sample_rate, channels=1)
+    mapping = build_concat_map(segments, sample_rate, total_samples=mono.samples.shape[1])
+    samples = np.concatenate([mono.samples[:, p.source_start:p.source_end] for p in mapping.pieces], axis=1) if mapping.pieces else np.empty((1, 0), np.float32)
+    return ConcatAudio(AudioBuffer(samples, sample_rate, vocals.source_id), mapping.pieces)

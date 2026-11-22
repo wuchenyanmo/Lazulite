@@ -6,9 +6,6 @@
 
 from .models.alignment import (
     AlignedLyricLine,
-    ForcedAlignmentRequest,
-    ForcedAlignmentResult,
-    ForcedAlignmentUnit,
     LineAlignmentResult,
 )
 from .models.audio import AudioBuffer, AudioMetadata, PreparedVocals, VocalAnalysis, VocalSegment
@@ -28,9 +25,6 @@ __all__ = [
     "AudioMetadata",
     "PreparedVocals",
     "BackendInfo",
-    "ForcedAlignmentRequest",
-    "ForcedAlignmentResult",
-    "ForcedAlignmentUnit",
     "LineAlignmentResult",
     "LyricDocument",
     "LyricLine",

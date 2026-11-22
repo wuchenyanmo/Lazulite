@@ -78,8 +78,6 @@ def candidate_from_netease_result(
     artist_names = list(chain.from_iterable(parse_netease_artist(item) for item in _song_artists(result)))
     album_data = _song_album(result)
     candidate_id = clean_text(result.get("id"))
-    if not candidate_id:
-        raise ValueError("网易云搜索结果缺少歌曲 ID")
     return SearchCandidate(
         source="netease",
         candidate_id=candidate_id,

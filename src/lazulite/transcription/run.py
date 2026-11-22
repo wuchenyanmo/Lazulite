@@ -157,7 +157,6 @@ class TranscriptionStage:
             raise ValueError("transcription stage missing request windows")
         history=[]
         for item, result in zip(expected, self.result.segments):
-            result.__post_init__()
             if result.request_window != item.segment or result.source_segment_id != item.segment.id:
                 raise ValueError("transcription window/parent mismatch")
             if result.backend_metadata.get('request_timing') is not self.request.include_timing:
@@ -177,5 +176,4 @@ def run_transcription_stage(audio, segments, *, transcriber, request=Transcripti
     result = transcribe_segments(audio, selected, transcriber=transcriber, request=request,
                                 config=config, cancel=cancel, event_sink=event_sink)
     stage = TranscriptionStage(selected, request, config, transcriber.capabilities, result)
-    stage.validate(audio)
     return stage

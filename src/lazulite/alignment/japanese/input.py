@@ -3,10 +3,11 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 import re
 import unicodedata
-from .kana import to_hiragana, is_kana, split_morae, is_kana_text
+from .kana import to_hiragana, is_kana, split_morae
 from .profile import JaHepburnProfile, is_hold
 
 VERSION = 'alignment-input/2'
+_HEPBURN = JaHepburnProfile()
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,7 @@ def nonpronouncing(text):
 def reading_pieces(reading, options=InputOptions()):
     """Internal script/mora pieces, with original reading code point ranges."""
     # Split punctuation before normalization so it cannot block sokuon context.
-    chunks = list(re.finditer(r'.', reading, re.S))
-    if any(nonpronouncing(m.group()) for m in chunks):
+    if any(nonpronouncing(c) for c in reading):
         result = []
         for match in re.finditer(r'[^\s]+|\s+', reading):
             start = match.start()
@@ -51,7 +51,6 @@ def reading_pieces(reading, options=InputOptions()):
     if not options.latin_normalize:
         return [(reading, 0, len(reading), False)]
     # Keep combining marks and half-width voicing attached before normalization.
-    import unicodedata
     clusters = []
     for i, c in enumerate(reading):
         if clusters and (unicodedata.category(c).startswith('M') or c in 'ﾞﾟ'):
@@ -103,16 +102,22 @@ def split_request(request, options=InputOptions()):
 def model_texts(readings, options=InputOptions(), groups=None):
     pieces = [reading_pieces(r, options) for r in readings]
     flat = [p for group in pieces for p in group]
-    kana_values = JaHepburnProfile().unit_texts([p[0] if p[3] else '' for p in flat], ['ja']*len(flat), [[] for _ in flat])
+    kana_values = _HEPBURN.unit_texts([p[0] if p[3] else '' for p in flat], ['ja']*len(flat), [[] for _ in flat])
     group_ids = [group for group, pieces_for_unit in zip(groups if groups is not None else range(len(readings)), pieces) for _ in pieces_for_unit]
+    reading_ids = [idx for idx, pieces_for_unit in enumerate(pieces) for _ in pieces_for_unit]
     values = []
     for p, kana_text in zip(flat, kana_values):
         value = kana_text if p[3] else romanizer().romanize_string(p[0]) if options.latin_normalize and p[0] else p[0]
         values.append(value)
     for i, value in enumerate(values):
         if options.strip_tone_digits:
-            following = next((values[j] for j in range(i+1,len(values)) if group_ids[j]==group_ids[i] and values[j]), '')
-            pattern = r'\d+(?=\s|$)' if not following or following[0].isspace() else r'\d+(?=\s)'
+            next_idx = next((j for j in range(i + 1, len(values)) if group_ids[j] == group_ids[i] and values[j]), None)
+            separated = (
+                next_idx is None
+                or values[next_idx][0].isspace()
+                or (reading_ids[next_idx] == reading_ids[i] and flat[next_idx][1] > flat[i][2])
+            )
+            pattern = r'\d+(?=\s|$)' if separated else r'\d+(?=\s)'
             value = re.sub(pattern, '', value)
         # Whitespace is a separator; punctuation/diacritics are checked, never silently erased.
         values[i] = ''.join(value.lower().split())
@@ -124,14 +129,16 @@ def model_texts(readings, options=InputOptions(), groups=None):
 
 def profile_request(request, vocabulary, blank, special_tokens=(), encoder=None, options=InputOptions()):
     texts, tokens, ranges, problems = {}, [], {}, {}
+    vocab_ids = set(vocabulary.values())
+    special_set = set(special_tokens)
     for line in request.lines:
         values = model_texts([u.reading for u in line.units], options, [u.input_group or u.unit_id for u in line.units])
         for u, text in zip(line.units, values):
             texts[u.unit_id] = text
             begin = len(tokens)
-            encoded = encoder(text, vocabulary) if encoder is not None and text else ([vocabulary[c] for c in text] if text and all(c in vocabulary and c not in special_tokens and c not in '| ' and vocabulary[c] != blank for c in text) else None)
+            encoded = encoder(text, vocabulary) if encoder is not None and text else ([vocabulary[c] for c in text] if text and all(c in vocabulary and c not in special_set and c not in '| ' and vocabulary[c] != blank for c in text) else None)
             if encoded:
-                if any(type(t) is not int or t == blank or t not in vocabulary.values() for t in encoded):
+                if any(type(t) is not int or t == blank or t not in vocab_ids for t in encoded):
                     raise ValueError('encoder produced invalid target IDs')
                 tokens.extend(encoded)
             else:

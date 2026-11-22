@@ -130,8 +130,11 @@ class PreparedVocals:
             raise ValueError("analysis and vocals have different source identities")
         if self.segment_source == "automatic" and self.segments != self.analysis.segments:
             raise ValueError("automatic selection must preserve analysis segments")
-        for segments in (self.analysis.segments, self.segments):
-            if len({s.id for s in segments}) != len(segments):
+        if self.segment_source == "manual":
+            if len({s.id for s in self.segments}) != len(self.segments):
                 raise ValueError("duplicate segment ID")
-            if any(s.start < 0 or s.end > self.vocals.duration for s in segments):
-                raise ValueError("segment outside complete stem")
+            groups = (self.analysis.segments, self.segments)
+        else:
+            groups = (self.analysis.segments,)
+        if any(s.start < 0 or s.end > self.vocals.duration for group in groups for s in group):
+            raise ValueError("segment outside complete stem")

@@ -32,16 +32,6 @@ whisper = [
     "torch>=2.6",
     "transformers==4.57.6",
 ]
-qwen = [
-    "qwen-asr==0.0.6",
-    "torch>=2.6",
-    "transformers==4.57.6",
-]
-forced-qwen = [
-    "qwen-asr==0.0.6",
-    "torch>=2.6",
-    "transformers==4.57.6",
-]
 vocal = [
     "demucs==4.0.1",
     "scipy==1.18.1",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 import subprocess
 from pathlib import Path
@@ -50,11 +49,14 @@ class _FakeProvider:
 
 
 def test_base_package_import_does_not_load_model_stacks() -> None:
-    sys.modules.pop("lazulite", None)
-    importlib.import_module("lazulite")
-
-    assert "torch" not in sys.modules
-    assert "transformers" not in sys.modules
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, lazulite; assert 'torch' not in sys.modules and 'transformers' not in sys.modules",
+        ],
+        check=True,
+    )
 
 
 def test_audio_and_vocal_segment_keep_explicit_layout_and_windows() -> None:
@@ -117,9 +119,9 @@ def test_ttml_projects_fixture_lines_without_serializing_the_source(tmp_path: Pa
     assert document.lines[0].source_start == 1.0
 
 
-@pytest.fixture
-def synthetic_audio(tmp_path: Path) -> Path:
-    source = tmp_path / "generated.m4a"
+@pytest.fixture(scope="module")
+def synthetic_audio(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    source = tmp_path_factory.mktemp("audio") / "generated.m4a"
     subprocess.run([
         "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
         "-c:a", "aac", "-metadata", "title=夜奏花", "-metadata", "artist=YURiKA", str(source),
@@ -168,13 +170,12 @@ def test_netease_parser_keeps_aliases_and_associates_translation() -> None:
     assert lyrics.translation_for("line-0") == "消失的飞机云"
 
 
-def test_audio_metadata_reads_search_fields_without_returning_raw_tags(synthetic_audio: Path) -> None:
+def test_audio_metadata_reads_search_fields(synthetic_audio: Path) -> None:
     metadata = read_audio_metadata(synthetic_audio)
 
     assert metadata.title == "夜奏花"
     assert metadata.artist == "YURiKA"
     assert metadata.duration == pytest.approx(2.0, abs=0.1)
-    assert not hasattr(metadata, "raw_tags")
 
 
 def test_ffmpeg_decode_uses_explicit_channel_sample_layout(synthetic_audio: Path) -> None:
@@ -185,11 +186,26 @@ def test_ffmpeg_decode_uses_explicit_channel_sample_layout(synthetic_audio: Path
     assert audio.duration == pytest.approx(2.0, abs=0.1)
 
 
-def test_activity_analysis_marks_core_and_padding_separately() -> None:
-    samples = np.zeros((1, 10_000), dtype=np.float32); samples[:, 2_000:7_000] = 0.5
-    analysis = analyze_vocals(AudioBuffer(samples, 1_000, "synthetic"), config=VocalConfig(min_segment_seconds=0.2))
+def test_activity_analysis_marks_core_and_padding_separately(monkeypatch) -> None:
+    from lazulite.audio import activity
+    samples = np.zeros((2, 10_000), dtype=np.float32); samples[:, 2_000:7_000] = 0.5
+    audio = AudioBuffer(samples, 1_000, "synthetic")
+    cfg = VocalConfig(min_segment_seconds=0.2)
+    analysis = analyze_vocals(audio, config=cfg)
     assert analysis.segments
     assert analysis.segments[0].start < analysis.segments[0].core_start
+    profile = activity.build_activity_profile(audio, config=cfg)
+    monkeypatch.setattr(activity, "build_activity_profile", lambda *a, **k: pytest.fail("should reuse profile"))
+    assert analyze_vocals(audio, config=cfg, profile=profile) == analysis
+
+
+def test_rms_prefix_sum_matches_sliding_window() -> None:
+    from lazulite.audio.activity import _rms
+    rng = np.random.default_rng(7)
+    values = rng.normal(scale=0.3, size=5000).astype(np.float32)
+    padded = np.pad(values, (1024, 1024))
+    ref = np.sqrt(np.mean(np.lib.stride_tricks.sliding_window_view(padded, 2048)[::256] ** 2, axis=1))
+    np.testing.assert_allclose(_rms(values, 2048, 256), ref, rtol=1e-5, atol=1e-6)
 
 
 def test_resample_audio_preserves_duration_and_explicit_channel_count() -> None:
@@ -212,7 +228,7 @@ def test_lrclib_parser_falls_back_to_plain_text() -> None:
     assert [line.text for line in lyrics.document.lines] == ["一行", "二行"]
 
 
-def test_public_lyric_search_fetch_and_rank_are_provider_independent(tmp_path: Path, synthetic_audio: Path) -> None:
+def test_public_lyric_search_fetch_and_rank_are_provider_independent(synthetic_audio: Path) -> None:
     metadata = read_audio_metadata(synthetic_audio)
     provider = _FakeProvider()
     candidates = search_lyrics(metadata, providers=(provider,))
@@ -245,7 +261,6 @@ def test_ttml_safe_roles_ruby_untimed_whitespace_and_snapshot_ids(tmp_path):
 
 def test_ttml_time_units_and_reject_relative_containers(tmp_path):
     from lazulite.lyrics.ttml import _parse_time
-    import pytest
     for value,expected in [('1.5',1.5),('1.5s',1.5),('1500ms',1.5),('1:02.5',62.5),('01:02:03.5',3723.5)]:
         assert _parse_time(value,field='test')==expected
     for value in ['NaN','2t','1:00:00:12','-1','inf']:

@@ -13,7 +13,7 @@ from lazulite.audio.separation import DemucsConfig, DemucsSeparator
 from lazulite.lyrics.ttml import read_ttml_for_alignment
 from lazulite.models.lyrics import LyricDocument
 from lazulite.pipeline import AlignmentPipeline, PipelineConfig
-from lazulite.transcription.backends import QwenBackend, QwenConfig, WhisperBackend, WhisperConfig
+from lazulite.transcription.backends import WhisperBackend, WhisperConfig
 
 
 def _metric_summary(errors: list[float]) -> dict[str, float | None]:
@@ -69,7 +69,7 @@ def _evaluation_document(reference: LyricDocument, *, mode: str, source_shift: f
 def main() -> int:
     parser = argparse.ArgumentParser(description="运行 Lazulite 自备素材整曲 benchmark")
     parser.add_argument("--fixture-dir", type=Path, required=True)
-    parser.add_argument("--backend", choices=("qwen", "whisper"), required=True)
+    parser.add_argument("--backend", choices=("whisper",), default="whisper")
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--mode", choices=("dp", "offset", "hybrid", "auto"), default="dp")
     parser.add_argument("--source-shift", type=float, default=4.0, help="非 DP 模式注入的已知源时间偏移秒数")
@@ -77,7 +77,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     model_started = perf_counter()
-    backend = QwenBackend(QwenConfig(arguments.model_path, "Qwen/Qwen3-ASR")) if arguments.backend == "qwen" else WhisperBackend(WhisperConfig(arguments.model_path, "openai/whisper-large-v3"))
+    backend = WhisperBackend(WhisperConfig(arguments.model_path, "openai/whisper-large-v3"))
     model_load_seconds = perf_counter() - model_started
     separator = None if arguments.without_separation else DemucsSeparator(DemucsConfig())
     records: list[dict[str, object]] = []

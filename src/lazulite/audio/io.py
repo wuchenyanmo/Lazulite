@@ -112,19 +112,18 @@ def resample_audio(
     if target_channels <= 0:
         raise ValueError("channels 必须为正数")
     source = audio.samples
-    if target_channels == 1:
+    if target_channels == source.shape[0]:
+        if sample_rate == audio.sample_rate:
+            return audio
+    elif target_channels == 1:
         source = source.mean(axis=0, keepdims=True)
     elif target_channels == 2 and source.shape[0] == 1:
         source = np.repeat(source, 2, axis=0)
-    elif target_channels != source.shape[0]:
+    else:
         raise ValueError("不支持该声道数转换")
-    if sample_rate == audio.sample_rate:
+    if sample_rate == audio.sample_rate or source.shape[1] == 0:
         return AudioBuffer(
-            source.astype(np.float32, copy=True), sample_rate, audio.source_id
-        )
-    if source.shape[1] == 0:
-        return AudioBuffer(
-            source.astype(np.float32, copy=True), sample_rate, audio.source_id
+            source.astype(np.float32, copy=False), sample_rate, audio.source_id
         )
     command = [
         "ffmpeg",

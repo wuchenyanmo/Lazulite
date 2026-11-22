@@ -44,8 +44,6 @@ class AcousticResult:
     special_tokens: tuple[str, ...] = ()
 
     def __post_init__(self):
-        self.frames.__post_init__()
-        self.mapping.__post_init__()
         lp = self.log_probabilities
         if lp.ndim != 2 or not np.issubdtype(lp.dtype,np.floating) or np.isnan(lp).any() or np.isposinf(lp).any() or np.any(lp > 1e-5):
             raise ValueError('expected frame log probabilities')
@@ -86,18 +84,16 @@ class DecodeResult:
     reason: str | None = None
 
     def __post_init__(self):
-        self.request.__post_init__()
-        self.frames.__post_init__()
-        self.mapping.__post_init__()
         if (type(self.frame_count) is not int or self.frame_count < 0 or
             self.frames.sample_rate != self.mapping.sample_rate or
             self.frame_count and self.frames.time(self.frame_count)>self.mapping.duration+1e-8 or
             not isfinite(self.original_duration) or self.original_duration<0 or
             any(p.source_end/self.mapping.sample_rate>self.original_duration+1/self.mapping.sample_rate+1e-8 for p in self.mapping.pieces)):
             raise ValueError('invalid decoded coordinates')
+        vocab_ids = set(self.vocabulary.values())
         if (type(self.blank_id) is not int or not 0<=self.blank_id<self.vocabulary_size or
-            any(type(v) is not int or not 0<=v<self.vocabulary_size for v in self.vocabulary.values()) or
-            any(t not in self.vocabulary.values() or t==self.blank_id for t in self.tokens)):
+            any(type(v) is not int or not 0<=v<self.vocabulary_size for v in vocab_ids) or
+            any(t not in vocab_ids or t==self.blank_id for t in self.tokens)):
             raise ValueError('invalid decoded target IDs')
         for key in ('first_pass_score','second_pass_score'):
             if key in self.execution and not isfinite(self.execution[key]): raise ValueError('invalid decode score')
@@ -113,11 +109,6 @@ class DecodeResult:
             raise ValueError('invalid decoded targets')
         if self.execution.get('input') != asdict(self.request):
             raise ValueError('decoded execution and target request differ')
-        if self.execution.get('profile') == 'ja-hepburn/2':
-            from .run import _profile
-            texts,tokens,ranges,problems = _profile(self.request,self.vocabulary,self.blank_id,self.special_tokens)
-            if (texts,tuple(tokens),ranges,problems)!=(self.texts,self.tokens,self.ranges,self.problems):
-                raise ValueError('decoded targets do not match readings')
         if (self.spans is None)!=(self.first_pass is None) or (self.spans is None and not self.reason):
             raise ValueError('decoded path status mismatch')
         for spans in (self.first_pass,self.spans):

@@ -18,7 +18,7 @@ from lazulite.lyrics.lrc import (
 )
 from lazulite.lyrics.providers.base import SearchCandidate, FetchedLyricCandidate
 from lazulite.lyrics.providers.qqmusic import QQMusicProvider
-from lazulite.lyrics.service import rank_lyrics, search_lyrics, _content_score
+from lazulite.lyrics.service import content_similarity, rank_lyrics, search_lyrics
 from lazulite.models.audio import (
     AudioBuffer,
     AudioMetadata,
@@ -35,7 +35,7 @@ from lazulite.models.transcription import (
 from lazulite.pipeline import AlignmentPipeline, PipelineConfig
 from lazulite.transcription.base import TranscriberCapabilities, TranscriptionRequest
 from lazulite.transcription.evidence import quality, comparable_confidence
-from lazulite.transcription.run import TranscriptionConfig, transcribe_segments
+from lazulite.transcription.run import transcribe_segments
 
 INFO = BackendInfo("fixture", "fixture", "offline", "float32")
 
@@ -134,8 +134,6 @@ def test_short_non_silent_track_skips_asr_and_keeps_lyrics():
 
 
 def test_actual_asr_input_is_main_vocal(monkeypatch):
-    import lazulite.pipeline as pipeline
-
     wave = np.stack(
         [np.linspace(-1, 1, 128000), np.linspace(0.8, -0.8, 128000)]
     ).astype(np.float32)
@@ -232,8 +230,6 @@ def test_task_context_is_local_and_timing_disables_prompt():
 
 
 def test_auto_fallback_only_requests_missing_stateless_windows(monkeypatch):
-    import lazulite.pipeline as pipeline
-
     segments = tuple(segment(i, i * 2, i * 2 + 2) for i in range(5))
     monkeypatch.setattr(
         __import__("lazulite.audio.preparation", fromlist=["analyze_vocals"]),
@@ -292,7 +288,7 @@ def test_content_traditional_score_and_qualified_timestamp_order():
     trans = TranscriptionResult(INFO, (transcript(0, "爱与梦"),))
     high = fetched("high", 100, "[00:01.00]愛與夢")
     low = fetched("low", 0, "[00:01.00]xxx")
-    assert _content_score(high, trans) == pytest.approx(1)
+    assert content_similarity("愛與夢", "爱与梦") == pytest.approx(1)
     assert [
         r.item.candidate.candidate_id
         for r in rank_lyrics((low, high), trans, providers=())

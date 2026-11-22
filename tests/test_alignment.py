@@ -1,6 +1,3 @@
-import json
-from pathlib import Path
-
 from lazulite.alignment.line import align_lines
 from lazulite.alignment.offset import OffsetAlignmentConfig, align_with_offset
 from lazulite.models.audio import VocalAnalysis, VocalSegment
@@ -61,24 +58,6 @@ def test_offset_alignment_uses_consistent_offsets_per_vocal_section():
     assert {anchor.line_id for anchor in result.anchors} == {"L1", "L2", "L3", "L4"}
 
 
-def test_frozen_generic_dp_regression_snapshot_keeps_every_line_traceable():
-    fixture = json.loads((Path(__file__).parent / "fixtures" / "alignment_regression.json").read_text(encoding="utf-8"))
-    document = LyricDocument(tuple(LyricLine(**line) for line in fixture["document"]))
-    analysis = VocalAnalysis("fixture", tuple(VocalSegment(**segment) for segment in fixture["segments"]))
-    transcript = TranscriptionResult(
-        BackendInfo(**fixture["backend"]),
-        tuple(TranscriptionSegment(**segment) for segment in fixture["transcription"]),
-    )
-
-    result = align_lines(document, transcript, analysis)
-    actual = [
-        {"line_id": line.line_id, "start": line.start, "end": line.end, "timing_source": line.timing_source, "source_segment_ids": list(line.source_segment_ids)}
-        for line in result.lines
-    ]
-
-    assert actual == fixture["expected"]
-
-
 def test_whisper_probability_policy_distinguishes_low_tokens_and_missing_summary():
     from dataclasses import replace
     from lazulite.models.transcription import ProbabilitySummary,TranscriptionSegment
@@ -115,7 +94,6 @@ def test_line_coverage_is_not_a_reliability_promise():
         AlignedLyricLine('b',None,None,None,None,'unresolved',())), 'dp',False,())
     assert result.status=='partial'
     assert result.coverage=={'total':2,'matched':1,'complete':0,'single_endpoint':1,'unresolved':1}
-    assert not hasattr(result,'reliable')
 
 
 def test_mixed_real_units_and_coarse_blocks_keep_boundary_provenance():

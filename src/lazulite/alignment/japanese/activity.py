@@ -52,8 +52,8 @@ def map_rest(rest, concat, frames, frame_map):
     return np.clip(values / stride, 0, 1)
 
 
-def frame_activity(prepared, concat, frames, frame_map):
-    rest, reference = original_rest(prepared.vocals)
+def frame_activity(prepared, concat, frames, frame_map, vocals_16k=None):
+    rest, reference = original_rest(vocals_16k if vocals_16k is not None else prepared.vocals)
     return map_rest(rest, concat, frames, frame_map), {
         'algorithm': VERSION, 'sample_rate': 16000,
         'rms_window_samples': 480, 'envelope_hop_samples': 160,

@@ -8,13 +8,14 @@ import warnings
 import requests
 from requests.exceptions import RequestException
 
+from lazulite import __version__
 from lazulite.lyrics.lrc import LrcDocument, read_lrc, read_plain_text
 from lazulite.lyrics.normalize import clean_text
 from lazulite.lyrics.search import SearchScoreFields, normalize_search_text, score_search_candidate
 
 from .base import SearchCandidate
 
-_HEADERS = {"User-Agent": "Lazulite/0.1"}
+_HEADERS = {"User-Agent": f"Lazulite/{__version__}"}
 _SEARCH_URL = "https://lrclib.net/api/search"
 _GET_URL = "https://lrclib.net/api/get/{lyric_id}"
 _METADATA = re.compile(r"^\[[A-Za-z]+:.*\]$")

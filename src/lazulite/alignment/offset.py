@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from statistics import median
 from collections import Counter
 from lazulite.lyrics.normalize import normalize_lyric_text
-from lazulite.transcription.evidence import quality, transcription_quality, EvidenceConfig
+from lazulite.transcription.evidence import transcription_quality, EvidenceConfig
 from .line import align_lines, LineAlignmentConfig
 from lazulite.transcription.timing import organize_timing
 
@@ -84,7 +84,7 @@ def _candidate_matrix(
 ) -> tuple[tuple[_Candidate | None, ...], ...]:
     segments = {segment.id: segment for segment in analysis.segments}
     timed_lines = [
-        (index, line)
+        (index, line, max(len(normalize_lyric_text(line.text)), 1))
         for index, line in enumerate(document.lines)
         if line.source_start is not None
     ]
@@ -107,15 +107,14 @@ def _candidate_matrix(
             continue
         candidates: list[_Candidate | None] = []
         observed = _observed_start(segment, item)
-        for index, line in timed_lines:
+        item_norm_len = len(normalize_lyric_text(item.text))
+        for index, line, line_norm_len in timed_lines:
             if guided_sources is not None and segment.id not in guided_sources.get(
                 line.id, set()
             ):
                 candidates.append(None)
                 continue
-            ratio = len(normalize_lyric_text(item.text)) / max(
-                len(normalize_lyric_text(line.text)), 1
-            )
+            ratio = item_norm_len / line_norm_len
             if not config.minimum_length_ratio <= ratio <= config.maximum_length_ratio:
                 candidates.append(None)
                 continue
@@ -345,10 +344,12 @@ def align_with_offset(
         if guidance is not None
         else align_lines(document, transcription, analysis, config=LineAlignmentConfig(evidence=config.evidence))
     )
-    matrix = _candidate_matrix(document, transcription, analysis, config, None)
-    unguided = _select_monotonic(matrix)
     guided = _guided_candidates(document, transcription, analysis, guidance, config)
-    selected = guided if guided or explicit_guidance else unguided
+    if guided or explicit_guidance:
+        selected = guided
+    else:
+        matrix = _candidate_matrix(document, transcription, analysis, config, None)
+        selected = _select_monotonic(matrix)
     section_by_segment = merge_sections(analysis, config)
     by_section: dict[int, list[_Candidate]] = {}
     for candidate in selected:

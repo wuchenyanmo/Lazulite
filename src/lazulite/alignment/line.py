@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 from lazulite.lyrics.similarity import text_similarity
@@ -53,10 +53,8 @@ def _merge_penalty(line_count: int, evidence_count: int) -> float:
     return 0.05 * max(0, line_count - 1) + 0.04 * max(0, evidence_count - 1)
 
 
-def _score(lines: tuple[str, ...], evidence: tuple[AlignmentEvidence, ...], policy=EvidenceConfig()) -> float:
-    value = 1.55 * text_similarity(
-        "\n".join(lines), "\n".join(item.transcription.text for item in evidence)
-    )
+def _non_text_score(line_count: int, evidence: tuple[AlignmentEvidence, ...], policy=EvidenceConfig()) -> float:
+    value = 0.0
     presence = [
         item.segment.presence for item in evidence if item.segment.presence is not None
     ]
@@ -81,7 +79,22 @@ def _score(lines: tuple[str, ...], evidence: tuple[AlignmentEvidence, ...], poli
         * sum(transcription_quality(item.transcription, item.segment, policy).risk for item in evidence)
         / len(evidence)
     )
-    return value - _merge_penalty(len(lines), len(evidence))
+    return value - _merge_penalty(line_count, len(evidence))
+
+
+def _score(
+    lines: tuple[str, ...],
+    evidence: tuple[AlignmentEvidence, ...],
+    policy=EvidenceConfig(),
+    *,
+    similarity: float | None = None,
+) -> float:
+    sim = (
+        text_similarity("\n".join(lines), "\n".join(item.transcription.text for item in evidence))
+        if similarity is None
+        else similarity
+    )
+    return 1.55 * sim + _non_text_score(len(lines), evidence, policy)
 
 
 def _timing(
@@ -205,10 +218,7 @@ def _boundary_split(lines, evidence, config):
         last = previous
     spans.reverse()
     # Same non-text evidence terms as the coarse window branch.
-    joined_similarity = text_similarity(
-        "\n".join(lines), "\n".join(item.transcription.text for item in evidence)
-    )
-    total += _score(lines, evidence, config.evidence) - 1.55 * joined_similarity
+    total += _non_text_score(len(lines), evidence, config.evidence)
     return total, spans
 
 
@@ -267,7 +277,7 @@ def align_lines(
                         "\n".join(lines),
                         "\n".join(item.transcription.text for item in group),
                     )
-                    score = _score(lines, group, config.evidence) - (
+                    score = _score(lines, group, config.evidence, similarity=similarity) - (
                         0.32 if similarity < config.minimum_similarity else 0
                     )
                     split = None
@@ -280,7 +290,7 @@ def align_lines(
                         trial = _boundary_split(lines, group, config)
                         if trial is not None and trial[0] > score:
                             score, split = trial
-                    candidates[row, column, line_count, evidence_count] = score, split
+                    candidates[row, column, line_count, evidence_count] = score, split, similarity
                     update(
                         row + line_count,
                         column + evidence_count,
@@ -297,12 +307,13 @@ def align_lines(
             break
         kind, line_count, evidence_count = action
         if kind == "match":
-            score, split = candidates[
-                row - line_count, column - evidence_count, line_count, evidence_count
-            ]
-            for position, index in enumerate(range(row - line_count, row)):
-                matches[index] = (column - evidence_count, column)
-                assignments[index] = (score, split[position] if split else None)
+            r0 = row - line_count
+            c0 = column - evidence_count
+            score, split, similarity = candidates[r0, c0, line_count, evidence_count]
+            linked = tuple(range(r0, row))
+            for position, index in enumerate(linked):
+                matches[index] = (c0, column)
+                assignments[index] = (score, split[position] if split else None, linked, position, similarity)
             row -= line_count
             column -= evidence_count
         elif kind == "line":
@@ -328,17 +339,8 @@ def align_lines(
             )
             continue
         group = evidence[matched_range[0] : matched_range[1]]
-        linked_lines = [
-            candidate
-            for candidate, candidate_range in matches.items()
-            if candidate_range == matched_range
-        ]
-        texts = tuple(document.lines[candidate].text for candidate in linked_lines)
+        score, split, linked_lines, position, similarity = assignments[index]
         source_ids = tuple(dict.fromkeys(item.segment.id for item in group))
-        similarity = text_similarity(
-            "\n".join(texts), "\n".join(item.transcription.text for item in group)
-        )
-        score, split = assignments[index]
         matched_text = " ".join(item.transcription.text for item in group)
         start_source=end_source=None
         if split is not None:
@@ -347,7 +349,7 @@ def align_lines(
         elif len(linked_lines) == 1:
             start, end, source, issues = _timing(group)
         else:
-            position = linked_lines.index(index)
+            texts = tuple(document.lines[candidate].text for candidate in linked_lines)
             start, end, issues = _interpolated_timing(texts, group, position)
             source = "interpolated"
         if start_source is None and start is not None:

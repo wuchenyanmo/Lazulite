@@ -6,10 +6,7 @@ import numpy as np
 import pytest
 from types import SimpleNamespace
 
-from lazulite.alignment.forced.qwen import QwenForcedAligner
-from lazulite.models.alignment import ForcedAlignmentRequest
 from lazulite.models.audio import AudioBuffer, VocalSegment
-from lazulite.transcription.backends.qwen import QwenBackend
 from lazulite.transcription.backends.whisper import WhisperBackend, _BYTE_DECODER
 from lazulite.transcription.base import TranscriptionInput
 from lazulite.transcription.token_scores import (
@@ -55,25 +52,6 @@ def test_empty_lexical_range_has_no_fake_confidence() -> None:
     assert summary.confidence is None
 
 
-def test_forced_output_maps_repeated_text_sequentially_and_keeps_zero_times() -> None:
-    request = ForcedAlignmentRequest("L1", "ああい", "ja", 10.0, (0, 3), "word")
-    units, diagnostics = QwenForcedAligner._map_units(
-        (
-            SimpleNamespace(text="あ", start_time=0.0, end_time=0.0),
-            SimpleNamespace(text="あ", start_time=0.1, end_time=0.2),
-            SimpleNamespace(text="い", start_time=0.2, end_time=0.3),
-            SimpleNamespace(text="う", start_time=0.3, end_time=0.4),
-        ),
-        request,
-    )
-
-    assert [unit.input_range for unit in units] == [(0, 1), (1, 2), (2, 3)]
-    assert units[0].start == 10.0
-    assert units[0].end == 10.0
-    assert all(unit.granularity == "character" for unit in units)
-    assert diagnostics == ("unmapped:う",)
-
-
 class _Tensor:
     def __init__(self, values): self._values = values
     def detach(self): return self
@@ -100,25 +78,6 @@ def test_whisper_unicode_group_uses_its_first_token_timestamp() -> None:
     timed = backend._timed_text([1, 2, 3], 1, [_Tensor([0.0, 1.0, 2.0, 3.0, 4.0])], item)
 
     assert [(unit.text, unit.start, unit.end) for unit in timed] == [("漢", 11.0, 13.0), ("A", 13.0, None)]
-
-
-class _QwenTokenizer:
-    all_special_ids = {99}
-    _tokens = {1: "language Japanese", 2: "<asr_text>", 3: "歌", 99: ""}
-
-    def batch_decode(self, values, **kwargs):
-        return ["".join(self._tokens[item] for item in values[0] if item not in self.all_special_ids)]
-
-
-def test_qwen_automatic_language_header_is_not_counted_as_lyric_tokens() -> None:
-    language, text, steps = QwenBackend._body_output(
-        _QwenTokenizer(), [1, 2, 3, 99], forced_language=None,
-        parse_asr_output=lambda raw, user_language: ("Japanese", "歌"),
-    )
-
-    assert language == "Japanese"
-    assert text == "歌"
-    assert steps == [2]
 
 
 def test_actual_windows_keep_parent_and_padding_only_core_empty():

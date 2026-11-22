@@ -25,8 +25,8 @@ class UnsupportedModel(ValueError):
     """Directory is not one of the supported acoustic formats."""
 
 
-def inspect_hf_model(path):
-    """Read small configuration files only; never instantiate or hash weights."""
+def _inspect_hf(path):
+    """Read small configuration files once; return layout and resolved model files."""
     path = Path(path)
     config = _object_file(path/'config.json')
     if config.get('model_type') != 'wav2vec2' or config.get('add_adapter', False):
@@ -48,15 +48,22 @@ def inspect_hf_model(path):
     columns, blank = config['vocab_size'], config['pad_token_id']
     if type(columns) is not int or columns<=0 or type(blank) is not int or not 0<=blank<columns or any(type(v) is not int or not 0<=v<columns for v in vocab.values()) or len(set(vocab.values()))!=len(vocab):
         raise ValueError('invalid model vocabulary/output layout')
-    if not any((path/name).is_file() for name in ('model.safetensors','pytorch_model.bin','model.safetensors.index.json','pytorch_model.bin.index.json')):
+    weight_names = ('model.safetensors', 'pytorch_model.bin', 'model.safetensors.index.json', 'pytorch_model.bin.index.json')
+    if not any((path/name).is_file() for name in weight_names):
         raise ValueError('model weights are missing')
     if pre.get('feature_size') != 1 or type(pre.get('do_normalize')) is not bool:
         raise ValueError('explicit mono feature extractor configuration required')
-    for name in ('model.safetensors.index.json', 'pytorch_model.bin.index.json'):
-        if (path/name).is_file():
-            for shard in _shards(path/name):
-                contained_file(path, shard)
-    return vocab, blank, columns, frames, pre['do_normalize']
+    names = ('config.json', 'preprocessor_config.json', 'processor_config.json', 'vocab.json', 'added_tokens.json', *weight_names)
+    files = [path/name for name in names if (path/name).is_file()]
+    for file in tuple(files):
+        if file.name.endswith('.index.json'):
+            files.extend(contained_file(path, shard) for shard in _shards(file))
+    return vocab, blank, columns, frames, pre['do_normalize'], tuple(files)
+
+
+def inspect_hf_model(path):
+    """Read small configuration files only; never instantiate or hash weights."""
+    return _inspect_hf(path)[:5]
 
 
 def chunked_forward(y, forward, *, frames, vocabulary_size, normalize=True, cancel=None, event_sink=None):
@@ -95,11 +102,21 @@ class NextFireConfig:
 
 
 class NextFireBackend:
-    def __init__(self, config: NextFireConfig):
-        self.config=config
-        self.vocab,self.blank,self.vocabulary_size,self.frames,self.normalize=inspect_model(config.model_path)
-        self.special_tokens=tuple(k for k in self.vocab if len(k)!=1 or k=='|')
-        self._model=None
+    _expected_type = 'wav2vec2-ctc'
+
+    def __init__(self, config: NextFireConfig, *, _info: dict | None = None):
+        self.config = config
+        info = _info if _info is not None else describe_model(config.model_path)
+        if info['type'] != self._expected_type:
+            raise UnsupportedModel(f"expected {self._expected_type}, got {info['type']}")
+        self.vocab = info['vocabulary']
+        self.blank = info['blank']
+        self.vocabulary_size = info['columns']
+        self.frames = info['frames']
+        self.normalize = info['normalize']
+        self._files = info['files']
+        self.special_tokens = tuple(k for k in self.vocab if len(k) != 1 or k == '|')
+        self._model = None
 
     @property
     def description(self):
@@ -156,16 +173,9 @@ def describe_model(path):
         return {'type': 'torchaudio-mms-fa', 'vocabulary': MMS_VOCAB.copy(), 'blank': 0,
                 'columns': 28, 'frames': FrameMap(16000, 320, 400), 'normalize': True,
                 'files': (declaration, weights)}
-    vocab, blank, columns, frames, normalize = inspect_hf_model(path)
-    names = ('config.json', 'preprocessor_config.json', 'processor_config.json', 'vocab.json',
-             'added_tokens.json', 'model.safetensors', 'pytorch_model.bin',
-             'model.safetensors.index.json', 'pytorch_model.bin.index.json')
-    files = [path/name for name in names if (path/name).is_file()]
-    for file in tuple(files):
-        if file.name.endswith('.index.json'):
-            files.extend(contained_file(path, name) for name in _shards(file))
+    vocab, blank, columns, frames, normalize, files = _inspect_hf(path)
     return {'type': 'wav2vec2-ctc', 'vocabulary': vocab, 'blank': blank, 'columns': columns,
-            'frames': frames, 'normalize': normalize, 'files': tuple(files)}
+            'frames': frames, 'normalize': normalize, 'files': files}
 
 
 def inspect_model(path):
@@ -174,6 +184,8 @@ def inspect_model(path):
 
 
 class MMSFABackend(NextFireBackend):
+    _expected_type = 'torchaudio-mms-fa'
+
     @property
     def description(self):
         return {**super().description, 'adapter': 'torchaudio-mms-fa'}
@@ -196,7 +208,7 @@ class MMSFABackend(NextFireBackend):
                     encoder_num_heads=16, encoder_attention_dropout=0.0, encoder_ff_interm_features=4096,
                     encoder_ff_interm_dropout=0.1, encoder_dropout=0.0, encoder_layer_norm_first=True,
                     encoder_layer_drop=0.1, aux_num_out=28)
-                state = torch.load(describe_model(self.config.model_path)['files'][1], map_location='cpu', weights_only=True)
+                state = torch.load(self._files[1], map_location='cpu', weights_only=True)
                 # Original MMS_FA checkpoint reserves rows 1, 2, 3 for unused symbols.
                 if tuple(state['aux.weight'].shape) != (31, 1024) or tuple(state['aux.bias'].shape) != (31,):
                     raise ValueError('MMS_FA requires the original 31-row output head')
@@ -218,4 +230,4 @@ class MMSFABackend(NextFireBackend):
 def open_backend(path, device='cpu'):
     info = describe_model(path)
     cls = MMSFABackend if info['type'] == 'torchaudio-mms-fa' else NextFireBackend
-    return cls(NextFireConfig(Path(path), device))
+    return cls(NextFireConfig(Path(path), device), _info=info)

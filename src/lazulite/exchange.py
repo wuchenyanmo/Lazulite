@@ -13,7 +13,6 @@ def _mapping(value):
 
 
 def write_acoustic(path, result):
-    result.__post_init__()
     metadata={k:getattr(result,k) for k in ('vocabulary','blank_id','original_duration','description','special_tokens')}
     metadata.update(schema='lazulite-acoustic-v1',frames=asdict(result.frames),mapping=asdict(result.mapping),
                     rest_present=result.rest is not None,numerical_definition='normalized natural log probabilities')
@@ -33,7 +32,6 @@ def read_acoustic(path):
 
 
 def write_decode(path, result):
-    result.__post_init__()
     Path(path).write_text(json.dumps({'schema':'lazulite-decode-v1',**asdict(result)},ensure_ascii=False,allow_nan=False),encoding='utf-8')
 
 

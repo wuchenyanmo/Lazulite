@@ -17,3 +17,20 @@ def test_overlap_preserves_samples_and_identity(length):
     np.testing.assert_allclose(output.samples,samples,atol=3e-7)
     separator.close()
     assert separator._model is None
+
+
+def test_multistem_model_requests_only_lead_stem():
+    torch = pytest.importorskip('torch')
+    calls = []
+    class MultiStemModel:
+        mask_estimators = [object(), object()]
+        def __call__(self, batch, **kwargs):
+            calls.append(kwargs)
+            return batch.unsqueeze(1)
+    separator = BSKaraokeSeparator(BSKaraokeConfig('unused'))
+    separator._settings = {'audio': {'chunk_size': 20}, 'inference': {'num_overlap': 2}}
+    separator._model = MultiStemModel()
+    samples = np.random.default_rng(1).normal(size=(2, 35)).astype('float32')
+    output = separator.separate(AudioBuffer(samples, 44100, 'source'))
+    assert calls and all(c == {'active_stem_ids': [0]} for c in calls)
+    np.testing.assert_allclose(output.samples, samples, atol=3e-7)

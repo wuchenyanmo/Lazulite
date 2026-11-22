@@ -84,7 +84,6 @@ class AlignmentPipeline:
     ) -> PipelineResult:
         from lazulite.events import checkpoint
         checkpoint(self._cancel)
-        prepared.__post_init__()
         audio = vocals = prepared.vocals
         analysis = replace(prepared.analysis, segments=prepared.segments)
         has_complete_source_times = bool(document.lines) and all(
@@ -186,7 +185,6 @@ class AlignmentPipeline:
                     result=TranscriptionResult(stage.result.backend,tuple(
                         replace(rows[i.segment.request_id],request_window=i.segment) for i in inputs))
                     stage=TranscriptionStage(tuple(segments),request,run_config,capabilities,result)
-                    stage.validate(asr_audio)
             stages[name] = stage
             return stage.result
 

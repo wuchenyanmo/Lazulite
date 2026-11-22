@@ -144,7 +144,6 @@ def test_explicit_stages_skip_backend_and_invalid_windows_fail(tmp_path):
 
 
 def test_auto_keeps_preselection_and_full_timing_conditions_separate(monkeypatch):
-    from dataclasses import replace
     class Fine(_RecordingBackend):
         capabilities=TranscriberCapabilities('subword',True,4)
     rejected=LineAlignmentResult((), 'offset',False,())

@@ -70,14 +70,10 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
         owners[1::2] = [identities[line] for line in token_lines]
         owners[2:-1:2] = np.where(owners[1:-2:2] == owners[3::2], owners[3::2], -1)
     stay_owned = owners >= 0
-    one_owned = stay_owned & (owners == np.r_[-2, owners[:-1]])
-    two_owned = stay_owned & (owners == np.r_[-2, -2, owners[:-2]])
-    def frame_cost(t):
-        c = np.zeros(S, np.float64)
-        c[gap_states] = -frame_seconds * (int(line_blank) + (4 * rest[t] if rest_blank else 0))
-        if rest_token:
-            c[1::2] = -25 * frame_seconds * rest[t]
-        return c
+    shifted_one = np.empty(S, np.int64); shifted_one[0] = -2; shifted_one[1:] = owners[:-1]
+    shifted_two = np.empty(S, np.int64); shifted_two[:2] = -2; shifted_two[2:] = owners[:-2]
+    one_owned = stay_owned & (owners == shifted_one)
+    two_owned = stay_owned & (owners == shifted_two)
     use_priors = line_blank or rest_blank or rest_token
     anchor_states = {}
     for a in anchors:
@@ -87,32 +83,68 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
         if state in anchor_states:
             raise ValueError('duplicate anchor token')
         anchor_states[state] = a
-    def costs(t):
-        c = np.zeros(S, np.float64)
-        for state,a in anchor_states.items():
-            d = abs((t-a.frame)/a.sigma_frames)
-            c[state] = -a.weight*(.5*d*d if d <= 1 else d-.5)
-        return c
+    c = np.zeros(S, np.float64)
+    fc = np.zeros(S, np.float64)
+    best = np.empty(S, np.float64)
+    cand = np.empty(S, np.float64)
+    take = np.empty(S, bool)
+    one_shifted = np.empty(S, np.float64); one_shifted[0] = -np.inf
+    two_shifted = np.empty(S, np.float64); two_shifted[:2] = -np.inf
+    gap_const = -frame_seconds * int(line_blank)
+    def update_anchors(t):
+        for state, a in anchor_states.items():
+            d = abs((t - a.frame) / a.sigma_frames)
+            c[state] = -a.weight * (.5 * d * d if d <= 1 else d - .5)
     checkpoint(cancel, event_sink, 'decode', 0,T)
     bp = np.zeros((T,S),np.uint8)
     prev = np.full(S,-np.inf,np.float64)
     prev[0] = lp[0,blank]
-    prev[1] = float(lp[0,z[1]])+costs(0)[1]
-    if use_priors: prev += frame_cost(0)
+    if anchor_states:
+        update_anchors(0)
+        prev[1] = float(lp[0,z[1]]) + c[1]
+    else:
+        prev[1] = float(lp[0,z[1]])
+    if use_priors:
+        if line_blank or rest_blank:
+            fc[gap_states] = gap_const - (4 * frame_seconds * rest[0] if rest_blank else 0.0)
+        if rest_token:
+            fc[1::2] = -25 * frame_seconds * rest[0]
+        prev += fc
     for t in range(1,T):
         if t % 128 == 0:
             checkpoint(cancel,event_sink,'decode',t,T)
-        c = costs(t)
-        penalty = 0 if seam_cost is None else seam_cost[t]
-        best = prev.copy() - penalty * stay_owned
-        one = np.r_[-np.inf,prev[:-1]] + c - penalty * one_owned
-        take = one > best
-        best[take] = one[take]; bp[t,take] = 1
-        two = np.r_[-np.inf,-np.inf,prev[:-2]] + c - penalty * two_owned
-        take = skip & (two > best)
-        best[take] = two[take]; bp[t,take] = 2
-        prev = best + lp[t,z].astype(np.float64)
-        if use_priors: prev += frame_cost(t)
+        if anchor_states:
+            update_anchors(t)
+        penalty = 0.0 if seam_cost is None else seam_cost[t]
+        np.copyto(best, prev)
+        if penalty:
+            best[stay_owned] -= penalty
+        one_shifted[1:] = prev[:-1]
+        if anchor_states:
+            np.add(one_shifted, c, out=cand)
+        else:
+            np.copyto(cand, one_shifted)
+        if penalty:
+            cand[one_owned] -= penalty
+        np.greater(cand, best, out=take)
+        best[take] = cand[take]; bp[t,take] = 1
+        two_shifted[2:] = prev[:-2]
+        if anchor_states:
+            np.add(two_shifted, c, out=cand)
+        else:
+            np.copyto(cand, two_shifted)
+        if penalty:
+            cand[two_owned] -= penalty
+        np.greater(cand, best, out=take)
+        take &= skip
+        best[take] = cand[take]; bp[t,take] = 2
+        np.add(best, lp[t,z], out=prev)
+        if use_priors:
+            if rest_blank:
+                fc[gap_states] = gap_const - 4 * frame_seconds * rest[t]
+            if rest_token:
+                fc[1::2] = -25 * frame_seconds * rest[t]
+            prev += fc
     state = S-1 if prev[-1] >= prev[-2] else S-2
     if not np.isfinite(prev[state]):
         raise NoFeasiblePath('no feasible global path')
@@ -122,8 +154,7 @@ def decode(logp, targets, blank, *, anchors=(), max_decode_memory_bytes=DEFAULT_
         path[t] = state
         state -= int(bp[t,state])
     checkpoint(cancel,event_sink,'decode',T,T)
-    spans = []
-    for i in range(len(targets)):
-        frames = np.flatnonzero(path == 2*i+1)
-        spans.append((int(frames[0]),int(frames[-1])+1))
-    return spans, score
+    target_states = np.arange(1, S, 2)
+    starts = np.searchsorted(path, target_states, side='left')
+    ends = np.searchsorted(path, target_states, side='right')
+    return [(int(a), int(b)) for a, b in zip(starts, ends)], score

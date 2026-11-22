@@ -57,11 +57,20 @@ def _smooth(values, size):
 
 
 def _rms(values, frame_length=2048, hop_length=256):
-    padded = np.pad(values, (frame_length // 2, frame_length // 2))
-    frames = np.lib.stride_tricks.sliding_window_view(padded, frame_length)[
-        ::hop_length
-    ]
-    return np.sqrt(np.mean(frames * frames, axis=1))
+    n = len(values)
+    pad = frame_length // 2
+    total = n + 2 * pad
+    if total < frame_length:
+        return np.empty(0, dtype=np.float32)
+    cs = np.empty(n + 1, dtype=np.float64)
+    cs[0] = 0.0
+    cs[1:] = values
+    cs[1:] *= cs[1:]
+    np.cumsum(cs[1:], out=cs[1:])
+    starts = np.arange(0, total - frame_length + 1, hop_length)
+    lo = np.clip(starts - pad, 0, n)
+    hi = np.clip(starts + frame_length - pad, 0, n)
+    return np.sqrt(np.maximum((cs[hi] - cs[lo]) / frame_length, 0.0)).astype(np.float32)
 
 
 def _db(values, reference):
@@ -268,10 +277,12 @@ def analyze_vocals(
     *,
     config: VocalConfig = VocalConfig(),
     reference: AudioBuffer | None = None,
+    profile: dict[str, np.ndarray] | None = None,
 ) -> VocalAnalysis:
     if audio.samples.shape[1] == 0:
         return VocalAnalysis(audio.source_id, (), ("no_vocal_evidence",), False, 0.0)
-    profile = build_activity_profile(audio, config=config)
+    if profile is None:
+        profile = build_activity_profile(audio, config=config)
     active, voiced_seconds = vocal_evidence(audio, reference=reference, config=config)
     activity, split = profile["activity"], profile["split_activity"]
     segments = []

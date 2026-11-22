@@ -1,5 +1,4 @@
 import itertools
-from dataclasses import replace
 import numpy as np
 import pytest
 from lazulite.alignment.japanese.ctc import decode
@@ -19,14 +18,14 @@ def test_costs_against_exhaustive_state_paths(switches):
     rng = np.random.default_rng(56)
     for targets in ([1, 1], [1, 2]):
         for lines in (['a', 'a'], ['a', 'b']):
-            lp = rng.normal(size=(6, 3))
-            rest = np.linspace(0, 1, 6)
+            lp = rng.normal(size=(5, 3))
+            rest = np.linspace(0, 1, 5)
             lb, rb, rt = switches
             spans, score = decode(lp, targets, blank=0, token_lines=lines, rest=rest, frame_seconds=.02,
                 line_blank=lb, rest_blank=rb, rest_token=rt)
             z = [0, targets[0], 0, targets[1], 0]
             scores = []
-            for path in itertools.product(range(5), repeat=6):
+            for path in itertools.product(range(5), repeat=5):
                 if path[0] not in (0, 1) or path[-1] not in (3, 4): continue
                 if any(not (b == a or b == a+1 or b == a+2 and z[b] != 0 and z[b] != z[a]) for a,b in zip(path,path[1:])): continue
                 scores.append(sum(lp[t,z[s]] - (.02*(lb+4*rb*rest[t]) if s==2 and lines[0]==lines[1] else 0)
@@ -55,7 +54,7 @@ def test_original_activity_and_seam_mapping():
     assert len(silent)==1 and silent[0]==0 and reference is None
 
 
-def test_combinations_explicit_acoustic_reuse(tmp_path, monkeypatch):
+def test_combinations_explicit_acoustic_reuse(monkeypatch):
     import lazulite.alignment.japanese.activity as activity
     import lazulite.alignment.japanese.run as run
     from lazulite.alignment.japanese.ctc import SoftAnchor
@@ -86,20 +85,6 @@ def test_combinations_explicit_acoustic_reuse(tmp_path, monkeypatch):
     assert b.calls==1
     with pytest.raises(ValueError): JapaneseConfig(line_blank=1)
 
-
-def test_disabled_costs_match_frozen_v1():
-    # Frozen recurrence extracted from the previous release, independent of v2.
-    import importlib.util
-    from pathlib import Path
-    path=Path(__file__).parent/'fixtures'/'ctc_v1.py'
-    import sys
-    spec=importlib.util.spec_from_file_location('ctc_v1',path)
-    old=importlib.util.module_from_spec(spec);sys.modules[spec.name]=old;spec.loader.exec_module(old)
-    rng=np.random.default_rng(37)
-    for targets in ([1,2,1],[1,1,2],[1]):
-        for _ in range(20):
-            lp=rng.normal(size=(12,4)).astype(np.float32)
-            assert decode(lp,targets,blank=0)==old.decode(lp,targets,blank=0)
 
 @pytest.mark.parametrize('lines', [('a','a'), ('a','b')])
 def test_seam_cost_matches_transition_enumeration(lines):

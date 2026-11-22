@@ -23,7 +23,6 @@ def candidate_from_kugou_result(item, *, title, duration, artist, album):
     artists=tuple(split_text(item.get("singername"),KUGOU_ARTIST_SEPARATORS)); names=tuple(str(item.get(key) or "").strip() for key in ("songname","songname_original","filename","othername") if item.get(key))
     fields=SearchScoreFields(float(item.get("duration") or 0),names,artists,(str(item.get("album_name") or "").strip(),))
     candidate_id=str(item.get("hash") or "")
-    if not candidate_id: raise ValueError("酷狗搜索结果缺少 hash")
     return SearchCandidate("kugou",candidate_id,names[0] if names else ""," / ".join(artists) or None,str(item.get("album_name") or "").strip() or None,fields.duration,score_search_candidate(title=title,duration=duration,fields=fields,artist=artist,album=album),dict(item))
 
 class KugouProvider:

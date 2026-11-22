@@ -79,9 +79,10 @@ def _project_paragraph(element,line_id):
             language='ja' if reading else 'unknown'
         units.append(JapaneseUnit(f'{line_id}:unit:{len(units)}',(start,len(text)),reading,language,source))
     def walk(node):
-        for name in ('begin','end','dur'):
-            value=_attribute(node,name)
-            if value is not None:_parse_time(value,field=name)
+        if node is not element:
+            for name in ('begin','end','dur'):
+                value=_attribute(node,name)
+                if value is not None:_parse_time(value,field=name)
         if not _standard(node) or _excluded(node) or _ruby(node) in {'text','textContainer','delimiter'}:return
         if _local_name(node.tag)=='br':
             append('\n');return
@@ -111,9 +112,10 @@ def _project_paragraph(element,line_id):
             walk(child)
             append(child.tail or '')
     walk(element)
-    begin=_attribute(element,'begin');end=_attribute(element,'end')
+    begin=_attribute(element,'begin');end=_attribute(element,'end');dur=_attribute(element,'dur')
     a=_parse_time(begin,field=f'{line_id} begin') if begin is not None else None
     b=_parse_time(end,field=f'{line_id} end') if end is not None else None
+    if dur is not None:_parse_time(dur,field='dur')
     if a is not None and b is not None and a>b:raise TtmlFormatError('line begin exceeds end')
     return _Projection(line_id,text,tuple(units),a,b,_attribute(element,'agent'))
 
@@ -128,9 +130,10 @@ def _read(path):
     def visit(node):
         if not _standard(node) or _excluded(node):return
         tag=_local_name(node.tag)
-        for name in ('begin','end','dur'):
-            value=_attribute(node,name)
-            if value is not None:_parse_time(value,field=name)
+        if tag!='p':
+            for name in ('begin','end','dur'):
+                value=_attribute(node,name)
+                if value is not None:_parse_time(value,field=name)
         if _attribute(node,'timeContainer') not in {None,'par'}:
             raise TtmlFormatError('不支持相对时间容器')
         if tag in {'tt','body','div'} and any(_attribute(node,k) is not None for k in ('begin','end','dur')):

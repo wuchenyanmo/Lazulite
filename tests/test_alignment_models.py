@@ -27,8 +27,11 @@ def test_mixed_input_mapping_and_unknowns():
     prepared=prepare_input(req,MMS_VOCAB,0,('-',),InputOptions(True,True))
     assert prepared['origins']=={'u/piece/0':'u','u/piece/1':'u'}
     assert prepared['request'].lines[0].units[0].reading_range==(0,2)
-    assert prepared['texts']=={'u/piece/0':'ga','u/piece/1':'nei214!'}
-    assert prepared['unknown_characters']['u/piece/1']==['!','1','2','4']
+    assert prepared['texts']=={'u/piece/0':'ga','u/piece/1':'nei'}
+    assert prepared['unknown_characters']=={}
+    unstripped=prepare_input(req,MMS_VOCAB,0,('-',),InputOptions(True,False))
+    assert unstripped['texts']=={'u/piece/0':'ga','u/piece/1':'nei214'}
+    assert unstripped['unknown_characters']['u/piece/1']==['1','2','4']
     assert model_texts(['nei214 hou55'],InputOptions(False,True))==['neihou']
 
 
@@ -62,3 +65,21 @@ def test_hf_shards_must_exist_inside_model_directory(tmp_path):
  assert (tmp_path/'part.safetensors') in describe_model(tmp_path)['files']
  index.write_text('{"weight_map":[]}')
  with pytest.raises(ValueError,match='index'):describe_model(tmp_path)
+
+
+def test_backend_init_validates_model_family(tmp_path):
+ from lazulite.alignment.japanese.backend import MMSFABackend, NextFireBackend, NextFireConfig, UnsupportedModel
+ mms_dir = tmp_path / 'mms'
+ mms_dir.mkdir()
+ (mms_dir / 'model.pt').write_bytes(b'stub')
+ (mms_dir / 'alignment-model.json').write_text(json.dumps({'type': 'torchaudio-mms-fa', 'weights': 'model.pt'}))
+ with pytest.raises(UnsupportedModel):
+  NextFireBackend(NextFireConfig(mms_dir))
+ hf_dir = tmp_path / 'hf'
+ hf_dir.mkdir()
+ (hf_dir / 'config.json').write_text(json.dumps({'model_type':'wav2vec2','conv_kernel':[3],'conv_stride':[2],'pad_token_id':0,'vocab_size':2}))
+ (hf_dir / 'preprocessor_config.json').write_text(json.dumps({'feature_size':1,'sampling_rate':16000,'do_normalize':True}))
+ (hf_dir / 'vocab.json').write_text('{"[PAD]":0,"a":1}')
+ (hf_dir / 'model.safetensors').write_bytes(b'stub')
+ with pytest.raises(UnsupportedModel):
+  MMSFABackend(NextFireConfig(hf_dir))
