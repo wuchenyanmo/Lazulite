@@ -91,3 +91,19 @@ def test_cjk_views_include_japanese_traditional_and_iteration(query,candidate):
     fields=SearchScoreFields(180,(candidate,),(),())
     assert score_search_candidate(title=query,duration=180,fields=fields)==100
     assert score_search_candidate(title=query,duration=196,fields=fields)==0
+
+
+def test_title_only_fallback_runs_after_artist_query_failure():
+    queries=[]
+    class Provider:
+        source_name='netease'
+        priority=1
+        def search(self, *, title, artist=None, **kwargs):
+            queries.append((title,artist))
+            if artist:raise RuntimeError('combined query unavailable')
+            return [make_candidate('netease','one',title,title)]
+    metadata=AudioMetadata(Path('unused.wav'),'Song','Singer',None,180)
+    with pytest.warns(RuntimeWarning,match='保留可用候选'):
+        rows=search_lyrics(metadata,providers=(Provider(),))
+    assert rows[0].candidate_id=='one'
+    assert queries[0]==('Song','Singer') and queries[-1]==('Song',None)

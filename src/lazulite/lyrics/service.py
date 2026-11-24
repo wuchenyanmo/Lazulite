@@ -115,6 +115,7 @@ def search_lyrics(
                 )
             except Exception as error:  # 单个网络来源不可阻断其他来源。
                 failure = (provider.source_name, error)
+                if provider.source_name in {"netease", "qqmusic", "kugou"}: continue
                 break
             succeeded = True
             for candidate in candidates:
@@ -149,7 +150,7 @@ def search_lyrics(
         details = "; ".join(f"{source}: {error}" for source, error in failures)
         raise RuntimeError(f"所有歌词来源搜索失败: {details}") from failures[0][1]
     for source, error in failures:
-        warnings.warn(f"歌词搜索来源失败，已跳过 {source}: {error}", RuntimeWarning)
+        warnings.warn(f"歌词搜索部分请求失败，已保留可用候选 {source}: {error}", RuntimeWarning)
     priority = {provider.source_name: provider.priority for provider in selected}
     return tuple(
         sorted(
