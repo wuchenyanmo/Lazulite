@@ -51,6 +51,7 @@ def _normalize_score_with(converter: OpenCC, text: str | None) -> str:
     value = normalize_search_text(text)
     if not value:
         return ""
+    value = re.sub(r"([\u3400-\u9fff])々", r"\1\1", value)
     return _SPACES.sub(" ", converter.convert(value)).strip()
 
 
@@ -82,6 +83,26 @@ def build_search_text_variants(text: str | None) -> list[str]:
     return variants
 
 
+@cache
+def _cjk_converters():
+    return tuple(OpenCC(config) for config in ('t2s', 'tw2s', 'hk2s', 'jp2t'))
+
+
+def _score_variants(text):
+    raw = normalize_search_text(text)
+    raw = re.sub(r"([\u3400-\u9fff])々", r"\1\1", raw)
+    values = {raw}
+    for converter in _cjk_converters():
+        values.add(_traditional_to_simplified().convert(converter.convert(raw)))
+    return tuple(filter(None, values))
+
+
+def _best_score(query, candidates, weight):
+    return max((combined_fuzzy_score(left, right, full_match_weight=weight)
+                for left in _score_variants(query) for candidate in candidates
+                for right in _score_variants(candidate)), default=0.0)
+
+
 def score_search_candidate(
     *,
     title: str,
@@ -101,31 +122,9 @@ def score_search_candidate(
     if fields.duration is None or abs(float(fields.duration) - duration) > duration_threshold:
         return 0.0
 
-    converter = _traditional_to_simplified()
-    score_title = _normalize_score_with(converter, title)
-    titles = tuple(filter(None, (_normalize_score_with(converter, value) for value in fields.title_candidates)))
-    title_score = max(
-        (combined_fuzzy_score(score_title, value, full_match_weight=name_full_match_weight) for value in titles),
-        default=0.0,
-    ) if score_title else 0.0
-    score_artist = _normalize_score_with(converter, artist) if artist is not None else ""
-    if score_artist:
-        artists = tuple(filter(None, (_normalize_score_with(converter, value) for value in fields.artist_candidates)))
-        artist_score = max(
-            (combined_fuzzy_score(score_artist, value, full_match_weight=artist_full_match_weight) for value in artists),
-            default=0.0,
-        )
-    else:
-        artist_score = 0.0
-    score_album = _normalize_score_with(converter, album) if album is not None else ""
-    if score_album:
-        albums = tuple(filter(None, (_normalize_score_with(converter, value) for value in fields.album_candidates)))
-        album_score = max(
-            (combined_fuzzy_score(score_album, value, full_match_weight=album_full_match_weight) for value in albums),
-            default=0.0,
-        )
-    else:
-        album_score = 0.0
+    title_score = _best_score(title, fields.title_candidates, name_full_match_weight)
+    artist_score = _best_score(artist, fields.artist_candidates, artist_full_match_weight) if artist else 0.0
+    album_score = _best_score(album, fields.album_candidates, album_full_match_weight) if album else 0.0
 
     effective_artist_weight = artist_weight if artist is not None else 0.0
     effective_album_weight = album_weight if album is not None else 0.0

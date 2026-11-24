@@ -459,7 +459,7 @@ def test_guided_multiline_anchors_use_each_lines_onset():
     assert [a.offset for a in result.anchors] == [2, 2, 2]
 
 
-def test_qq_search_requires_detail_duration_before_scoring():
+def test_qq_search_uses_complete_search_metadata_for_scoring():
     class Response:
         def __init__(self, payload):
             self.payload = payload
@@ -477,21 +477,22 @@ def test_qq_search_requires_detail_duration_before_scoring():
             )
 
         def post(self, *a, **k):
-            assert k["json"]["req_0"]["param"] == {"song_id": 123}
+            assert k["json"]["req_0"]["method"] == "DoSearchForQQMusicDesktop"
+            assert k["json"]["req_0"]["param"]["num_per_page"] == 30
             return Response(
                 {
                     "code": 0,
                     "req_0": {
                         "code": 0,
                         "data": {
-                            "track_info": {
+                            "body": {"song": {"list": [{
                                 "id": 123,
                                 "mid": "mid",
                                 "name": "song",
                                 "interval": 60,
                                 "singer": [{"name": "artist"}],
                                 "album": {"name": "different", "subtitle": "album"},
-                            }
+                            }]}}
                         },
                     },
                 }
@@ -586,20 +587,8 @@ def test_cli_passes_actual_stereo_44100_to_separator(monkeypatch, tmp_path):
 
 
 
-def test_qq_missing_duration_does_not_become_zero_scored_success(monkeypatch):
+def test_qq_missing_duration_remains_zero_scored_without_detail_lookup(monkeypatch):
     provider = QQMusicProvider()
-    monkeypatch.setattr(
-        provider,
-        "_request",
-        lambda *a, **k: {
-            "code": 0,
-            "data": {"song": {"itemlist": [{"id": 1, "mid": "mid"}]}},
-        },
-    )
-    monkeypatch.setattr(
-        provider,
-        "_musicu",
-        lambda *a, **k: {"track_info": {"mid": "mid", "name": "song"}},
-    )
-    with pytest.raises(RuntimeError, match="详情全部获取失败"):
-        provider.search("song", 60)
+    monkeypatch.setattr(provider, '_musicu', lambda *a, **k: {'body':{'song':{'list':[{'mid':'mid','name':'song'}]}}})
+    candidates = provider.search('song', 60)
+    assert len(candidates) == 1 and candidates[0].match_score == 0

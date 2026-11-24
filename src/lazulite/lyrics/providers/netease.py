@@ -23,8 +23,8 @@ _HEADERS = {
         "Chrome/129.0.0.0 Safari/537.36"
     )
 }
-_SEARCH_LIMIT = 20
-_SEARCH_URL = "https://music.163.com/api/search/get?s={name}&type=1&offset=0&limit={limit}"
+_SEARCH_LIMIT = 30
+_SEARCH_URL = "https://music.163.com/api/search/get/web?s={name}&type=1&offset=0&limit={limit}"
 _LYRIC_URL = "https://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&tv=-1"
 
 
@@ -122,7 +122,7 @@ class NeteaseProvider:
         score_artist: str | None = None,
         score_album: str | None = None,
     ) -> list[SearchCandidate]:
-        url = _SEARCH_URL.format(name=quote(title), limit=_SEARCH_LIMIT)
+        url = _SEARCH_URL.format(name=quote(" ".join(v for v in (title, artist) if v)), limit=_SEARCH_LIMIT)
         try:
             response = self._session.get(url, headers=_HEADERS, timeout=(5, 7))
             response.raise_for_status()

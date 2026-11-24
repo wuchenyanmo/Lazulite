@@ -16,7 +16,7 @@ from lazulite.lyrics.search import SearchScoreFields, score_search_candidate
 from .base import SearchCandidate
 
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://y.qq.com/"}
-_SEARCH_URL = "https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg"
+_SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp"
 _LYRIC_URL = "https://i.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 _MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
 
@@ -109,7 +109,6 @@ class QQMusicProvider:
 
     def __init__(self, *, session: requests.Session | None = None) -> None:
         self._session = session or requests.Session()
-        self._details = {}
 
     def _request(self, url, *, params=None, body=None):
         last_error = None
@@ -143,23 +142,6 @@ class QQMusicProvider:
             raise RuntimeError("QQ musicu 返回失败状态")
         return response.get("data") or {}
 
-    def _detail(self, song):
-        key = str(song.get("id") or song.get("mid") or "")
-        if key not in self._details:
-            parameters = (
-                {"song_id": int(song["id"])}
-                if song.get("id")
-                else {"song_mid": song["mid"]}
-            )
-            result = self._musicu(
-                "music.pf_song_detail_svr", "get_song_detail_yqq", parameters
-            )
-            track = result.get("track_info") or {}
-            if not track.get("mid") or not track.get("interval"):
-                raise ValueError("QQ 详情缺少歌曲 ID 或时长，无法评分")
-            self._details[key] = track
-        return self._details[key]
-
     def search(
         self,
         title: str,
@@ -170,33 +152,21 @@ class QQMusicProvider:
         score_artist: str | None = None,
         score_album: str | None = None,
     ) -> list[SearchCandidate]:
-        payload = self._request(
-            _SEARCH_URL,
-            params={"format": "json", "key": " ".join(v for v in (title, artist) if v)},
-        )
-        if payload.get("code") != 0:
-            raise RuntimeError("QQ 搜索失败")
-        songs = ((payload.get("data") or {}).get("song") or {}).get("itemlist") or []
-        candidates = []
-        errors = []
-        for song in songs[:20]:
-            try:
-                detail = self._detail(song)
-                candidates.append(
-                    candidate_from_qq_result(
-                        detail,
-                        title=score_title or title,
-                        duration=duration,
-                        artist=score_artist if score_artist is not None else artist,
-                        album=score_album if score_album is not None else album,
-                    )
-                )
-            except (RuntimeError, ValueError) as error:
-                errors.append(error)
-        if songs and not candidates and errors:
-            raise RuntimeError("QQ 搜索结果详情全部获取失败") from errors[0]
-        for error in errors:
-            warnings.warn(str(error), RuntimeWarning)
+        query = " ".join(v for v in (title, artist) if v)
+        try:
+            result = self._musicu("music.search.SearchCgiService", "DoSearchForQQMusicDesktop", {"query":query,"search_type":0,"page_num":1,"num_per_page":30})
+            songs = result.get("body", {}).get("song", {}).get("list", [])
+        except (RuntimeError, ValueError):
+            songs = []
+        if not songs:
+            payload = self._request(_SEARCH_URL, params={"format":"json","w":query,"n":30,"p":1,"ct":24,"platform":"yqq.json"})
+            if payload.get("code", 0) != 0:
+                raise RuntimeError("QQ 备用搜索失败")
+            songs = payload.get("data", {}).get("song", {}).get("list", [])
+        candidates = [candidate_from_qq_result(song, title=score_title or title, duration=duration,
+            artist=score_artist if score_artist is not None else artist,
+            album=score_album if score_album is not None else album)
+            for song in songs if song.get("mid") or song.get("songmid")]
         return sorted(
             candidates, key=lambda item: (-item.match_score, item.candidate_id)
         )

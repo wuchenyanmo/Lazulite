@@ -10,7 +10,7 @@ from lazulite.lyrics.search import SearchScoreFields, score_search_candidate
 from .base import SearchCandidate
 
 _HEADERS={"User-Agent":"Mozilla/5.0","Referer":"https://www.kugou.com/"}
-_SEARCH="https://mobilecdn.kugou.com/api/v3/search/song"; _LYRIC_SEARCH="https://lyrics.kugou.com/search"; _DOWNLOAD="https://lyrics.kugou.com/download"
+_SEARCH="https://mobiles.kugou.com/api/v3/search/song"; _LYRIC_SEARCH="https://lyrics.kugou.com/search"; _DOWNLOAD="https://lyrics.kugou.com/download"
 
 def _get(session, url, params, *, strict=False):
     try:
@@ -29,9 +29,18 @@ class KugouProvider:
     source_name="kugou"; priority=100
     def __init__(self,*,session=None): self._session=session or requests.Session()
     def search(self,title,duration,artist=None,album=None,score_title=None,score_artist=None,score_album=None):
-        payload=_get(self._session,_SEARCH,{"format":"json","keyword":title,"page":1,"pagesize":20,"showtype":1},strict=True)
-        if payload.get("status",1) != 1: raise RuntimeError("酷狗搜索返回失败状态")
-        return sorted((candidate_from_kugou_result(item,title=score_title or title,duration=duration,artist=score_artist if score_artist is not None else artist,album=score_album if score_album is not None else album) for item in ((payload.get("data") or {}).get("info") or []) if item.get("hash")),key=lambda item:item.match_score,reverse=True)
+        keyword=" ".join(value for value in (title,artist) if value)
+        try:
+            payload=_get(self._session,_SEARCH,{"format":"json","keyword":keyword,"page":1,"pagesize":30,"showtype":14,"plat":0,"sver":5,"correct":1,"api_ver":1,"version":9108},strict=True)
+            if payload.get("status",1) != 1: raise RuntimeError("酷狗搜索返回失败状态")
+            songs=(payload.get("data") or {}).get("info") or []
+        except RuntimeError:
+            songs=[]
+        if not songs:
+            payload=_get(self._session,"https://songsearch.kugou.com/song_search_v2",{"keyword":keyword,"page":1,"pagesize":30},strict=True)
+            if payload.get("status",1) != 1: raise RuntimeError("酷狗备用搜索返回失败状态")
+            songs=[{"hash":s.get("FileHash"),"songname":s.get("SongName") or s.get("FileName"),"singername":s.get("SingerName"),"album_name":s.get("AlbumName"),"duration":s.get("Duration")} for s in (payload.get("data") or {}).get("lists",[])]
+        return sorted((candidate_from_kugou_result(item,title=score_title or title,duration=duration,artist=score_artist if score_artist is not None else artist,album=score_album if score_album is not None else album) for item in songs if item.get("hash")),key=lambda item:item.match_score,reverse=True)
     def fetch(self,candidate):
         query=f"{candidate.artist} - {candidate.title}" if candidate.artist else candidate.title
         candidates=_get(self._session,_LYRIC_SEARCH,{"ver":1,"man":"yes","client":"pc","keyword":query,"duration":round((candidate.duration or 0)*1000),"hash":candidate.candidate_id}).get("candidates") or []

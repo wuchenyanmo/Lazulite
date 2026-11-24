@@ -85,3 +85,9 @@ def test_empty_fields_have_no_score_and_missing_fields_reweight():
     assert score_search_candidate(
         title="歌", duration=180, artist="Lia", album="AIR", fields=fields
     ) == pytest.approx(70)
+
+@pytest.mark.parametrize('query,candidate',[('桜','樱'),('國々','国国'),('裏','里')])
+def test_cjk_views_include_japanese_traditional_and_iteration(query,candidate):
+    fields=SearchScoreFields(180,(candidate,),(),())
+    assert score_search_candidate(title=query,duration=180,fields=fields)==100
+    assert score_search_candidate(title=query,duration=196,fields=fields)==0

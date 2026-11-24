@@ -98,6 +98,10 @@ def search_lyrics(
                 query = (title, artist or None, album or None)
                 if query not in queries:
                     queries.append(query)
+        if provider.source_name in {"netease", "qqmusic", "kugou"}:
+            for title in title_variants:
+                query = (title, None, None)
+                if query not in queries: queries.append(query)
         for title, artist, album in queries:
             try:
                 candidates = provider.search(
