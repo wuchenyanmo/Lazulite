@@ -8,6 +8,7 @@ from lazulite.transcription.evidence import quality, comparable_confidence
 from .search import _traditional_to_simplified
 from typing import Iterable, Sequence
 import warnings
+from requests import RequestException
 
 from lazulite.lyrics.providers import (
     FetchedLyricCandidate,
@@ -89,13 +90,14 @@ def search_lyrics(
         succeeded = False
         deduplicated: dict[str, SearchCandidate] = {}
         queries: list[tuple[str, str | None, str | None]] = []
+        combined_sources = {"netease", "qqmusic", "kugou"}
         for title in title_variants:
             for artist, album in (
                 (artist_variants[0], album_variants[0]),
                 (artist_variants[-1], album_variants[-1]),
                 (artist_variants[-1], ""),
             ):
-                query = (title, artist or None, album or None)
+                query = (title, artist or None, None if provider.source_name in combined_sources else album or None)
                 if query not in queries:
                     queries.append(query)
         if provider.source_name in {"netease", "qqmusic", "kugou"}:
@@ -113,9 +115,8 @@ def search_lyrics(
                     score_artist=metadata.artist,
                     score_album=metadata.album,
                 )
-            except Exception as error:  # 单个网络来源不可阻断其他来源。
+            except (RequestException, RuntimeError) as error:
                 failure = (provider.source_name, error)
-                if provider.source_name in {"netease", "qqmusic", "kugou"}: continue
                 break
             succeeded = True
             for candidate in candidates:

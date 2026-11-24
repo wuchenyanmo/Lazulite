@@ -85,15 +85,19 @@ def build_search_text_variants(text: str | None) -> list[str]:
 
 @cache
 def _cjk_converters():
-    return tuple(OpenCC(config) for config in ('t2s', 'tw2s', 'hk2s', 'jp2t'))
+    return tuple((config, OpenCC(config)) for config in ('t2s', 'tw2s', 'hk2s', 'jp2t'))
 
 
 def _score_variants(text):
     raw = normalize_search_text(text)
+    raw = re.sub(r'\b(?:feat|ft)\b\.?\s*', ' ', raw, flags=re.I)
+    raw = re.sub(r'[()\[\]（）【】,，.。:：;；/、]', ' ', raw)
+    raw = _SPACES.sub(' ', raw).strip()
     raw = re.sub(r"([\u3400-\u9fff])々", r"\1\1", raw)
     values = {raw}
-    for converter in _cjk_converters():
-        values.add(_traditional_to_simplified().convert(converter.convert(raw)))
+    for config, converter in _cjk_converters():
+        value = converter.convert(raw)
+        values.add(_traditional_to_simplified().convert(value) if config == 'jp2t' else value)
     return tuple(filter(None, values))
 
 

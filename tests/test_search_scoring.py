@@ -61,8 +61,8 @@ def test_threshold_uses_unrounded_score_and_ties_use_candidate_id():
     metadata = AudioMetadata(Path("unused.wav"), "鳥の詩", None, None, 180)
     result = search_lyrics(metadata, providers=(provider,), min_match_score=75)
     assert [item.candidate_id for item in result] == ["a", "b"]
-    assert [item.match_score for item in result] == pytest.approx([75, 75])
-    assert search_lyrics(metadata, providers=(provider,), min_match_score=75.1) == ()
+    assert [item.match_score for item in result] == pytest.approx([77.14285714285714, 77.14285714285714])
+    assert search_lyrics(metadata, providers=(provider,), min_match_score=77.2) == ()
 
 
 @pytest.mark.parametrize("duration, expected", [
@@ -93,17 +93,48 @@ def test_cjk_views_include_japanese_traditional_and_iteration(query,candidate):
     assert score_search_candidate(title=query,duration=196,fields=fields)==0
 
 
-def test_title_only_fallback_runs_after_artist_query_failure():
+def test_title_only_fallback_runs_after_empty_artist_query():
     queries=[]
     class Provider:
         source_name='netease'
         priority=1
         def search(self, *, title, artist=None, **kwargs):
             queries.append((title,artist))
-            if artist:raise RuntimeError('combined query unavailable')
+            if artist:return []
             return [make_candidate('netease','one',title,title)]
     metadata=AudioMetadata(Path('unused.wav'),'Song','Singer',None,180)
-    with pytest.warns(RuntimeWarning,match='保留可用候选'):
-        rows=search_lyrics(metadata,providers=(Provider(),))
+    rows=search_lyrics(metadata,providers=(Provider(),))
     assert rows[0].candidate_id=='one'
     assert queries[0]==('Song','Singer') and queries[-1]==('Song',None)
+
+@pytest.mark.parametrize('error',[RuntimeError('network'),TypeError('programming')])
+def test_search_stops_query_variants_on_failure_and_preserves_programming_errors(error):
+    queries=[]
+    class Provider:
+        source_name='netease'
+        priority=1
+        def search(self, **kwargs):
+            queries.append(kwargs)
+            raise error
+    with pytest.raises(type(error)):
+        search_lyrics(AudioMetadata(Path('unused.wav'),'Song (Live)','Singer','Album',180),providers=(Provider(),))
+    assert len(queries)==1
+
+
+def test_album_does_not_duplicate_keywords_but_remains_available_for_scoring():
+    queries=[]
+    class Provider:
+        source_name='qqmusic'
+        priority=1
+        def search(self, **kwargs):
+            queries.append(kwargs)
+            return []
+    search_lyrics(AudioMetadata(Path('unused.wav'),'Song','Singer','Album',180),providers=(Provider(),))
+    assert [(q['title'],q['artist'],q['album']) for q in queries]==[('Song','Singer',None),('Song',None,None)]
+    assert all(q['score_album']=='Album' for q in queries)
+
+def test_score_punctuation_and_featuring_labels_do_not_change_artist_identity():
+    fields=SearchScoreFields(180,('Song',),('Singer Guest',),())
+    assert score_search_candidate(title='Song',duration=180,artist='Singer (feat. Guest)',fields=fields)==pytest.approx(100)
+    from lazulite.lyrics.search import _score_variants
+    assert 'feature' in _score_variants('feature')
